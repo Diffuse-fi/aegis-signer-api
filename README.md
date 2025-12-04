@@ -12,7 +12,7 @@ A simple Express.js service that signs concatenated address and amount strings u
 2.  **Configure Environment**
     Copy the example environment file and set your `ETH_PRIVATE_KEY`.
     ```bash
-    cp env_example .env
+    cp .env.example .env
     # Edit .env and add your private key
     ```
 
