@@ -1,41 +1,38 @@
-import { createWalletClient, http, type Hex } from 'viem';
+import { createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet } from 'viem/chains';
-import dotenv from 'dotenv';
+import { config } from './config.js';
 
-dotenv.config();
-
-const privateKey = process.env.ETH_PRIVATE_KEY as Hex;
-if (!privateKey) {
-  console.warn('ETH_PRIVATE_KEY is not set in environment variables');
+// Initialize account once at startup. Fail fast if invalid.
+let account: ReturnType<typeof privateKeyToAccount>;
+try {
+  account = privateKeyToAccount(config.privateKey);
+} catch (error) {
+  const message = error instanceof Error ? error.message : 'Unknown error';
+  throw new Error(`Failed to initialize account from private key: ${message}`);
 }
-
-const account = privateKey ? privateKeyToAccount(privateKey) : undefined;
 
 const client = createWalletClient({
   account,
   chain: mainnet,
-  transport: http()
+  transport: http(),
 });
 
-export async function signMessage(textToSign: string) {
-  if (!account) {
-    throw new Error('Signer account not initialized (check ETH_PRIVATE_KEY)');
+/**
+ * Signs a plain text message using the configured account.
+ * Note: This produces an EIP-191 signature (0x19 <0x45 (E)> <personal_sign prefix> <length> <data>).
+ */
+export async function signMessage(textToSign: string): Promise<string> {
+  if (!textToSign) {
+    throw new Error('Message content cannot be empty');
   }
 
-  // The example uses simple personal_sign with hex encoded string
-  // In viem, signMessage automatically handles the prefixing
-  // "0x" + hex(text) is what we want to sign
-
-  // Convert text to hex string if it's not already
-  const signature = await client.signMessage({
+  return client.signMessage({
     account,
     message: textToSign,
   });
-
-  return signature;
 }
 
 export function getSignerAddress() {
-  return account?.address;
+  return account.address;
 }

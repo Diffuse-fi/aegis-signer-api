@@ -53,7 +53,15 @@ Accepts an address and amount, concatenates them, and returns the signature.
 }
 ```
 
-### `GET /ping`
+### `GET /health`
 
-Returns `pong` to check server health.
+Returns server health status and signer address.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "signer": "0x..."
+}
+```
 

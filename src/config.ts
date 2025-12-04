@@ -1,0 +1,27 @@
+import dotenv from 'dotenv';
+import { type Hex, isHex } from 'viem';
+
+dotenv.config();
+
+const getEnvVar = (key: string, required = true): string => {
+  const value = process.env[key];
+  if (required && !value) {
+    throw new Error(`Environment variable ${key} is required`);
+  }
+  return value || '';
+};
+
+const getPrivateKey = (): Hex => {
+  const key = getEnvVar('ETH_PRIVATE_KEY');
+  if (!isHex(key) || key.length !== 66) {
+    throw new Error('ETH_PRIVATE_KEY must be a valid 66-character hex string (0x + 64 hex chars)');
+  }
+  return key as Hex;
+};
+
+export const config = {
+  port: parseInt(getEnvVar('PORT', false), 10) || 3000,
+  privateKey: getPrivateKey(),
+  corsOrigin: getEnvVar('CORS_ORIGIN', false) || '*',
+} as const;
+

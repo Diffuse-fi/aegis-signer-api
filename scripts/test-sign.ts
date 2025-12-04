@@ -3,15 +3,15 @@ const API_URL = 'http://localhost:3000';
 async function main() {
   console.log('🧪 Starting manual test (Simple Sign)...');
 
-  // 1. Ping Test
+  // 1. Health Check Test
   try {
-    console.log('\n📡 Testing /ping...');
-    const pingRes = await fetch(`${API_URL}/ping`);
-    const pingText = await pingRes.text();
-    console.log(`Status: ${pingRes.status}`);
-    console.log(`Response: ${pingText}`);
+    console.log('\n📡 Testing /health...');
+    const healthRes = await fetch(`${API_URL}/health`);
+    const healthData = await healthRes.json();
+    console.log(`Status: ${healthRes.status}`);
+    console.log(`Response:`, JSON.stringify(healthData, null, 2));
   } catch (error) {
-    console.error('Ping failed:', error);
+    console.error('Health check failed:', error);
     process.exit(1);
   }
 
