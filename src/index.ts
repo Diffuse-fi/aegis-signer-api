@@ -18,6 +18,9 @@ const app = express();
 // Security: Helmet for security headers
 app.use(helmet());
 
+// Trust proxy (needed for rate limit behind Nginx)
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors({
   origin: config.corsOrigin,
@@ -32,7 +35,8 @@ const limiter = rateLimit({
   max: 100, // Limit each IP to 100 requests per windowMs
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  message: 'Too many requests from this IP, please try again later.'
+  message: 'Too many requests from this IP, please try again later.',
+  validate: { xForwardedForHeader: false } // Disable X-Forwarded-For check if we trust proxy correctly
 });
 app.use(limiter);
 
@@ -157,8 +161,14 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
 });
 
 // Centralized Error Handling
-app.use((err: Error, _req: Request, res: Response) => {
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[Error]', err.message);
+
+  // Check if headers have already been sent to avoid "Cannot set headers after they are sent to the client"
+  if (res.headersSent) {
+    return _next(err);
+  }
+
   res.status(500).json({
     error: 'Internal Server Error',
   });
