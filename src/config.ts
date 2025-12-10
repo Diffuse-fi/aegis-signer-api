@@ -22,6 +22,15 @@ const getPrivateKey = (): Hex => {
 export const config = {
   port: parseInt(getEnvVar('PORT', false), 10) || 3000,
   privateKey: getPrivateKey(),
-  corsOrigin: getEnvVar('CORS_ORIGIN', false) || '*',
+  corsOrigin: getEnvVar('CORS_ORIGIN', false).split(',').map(o => o.trim()).filter(Boolean).length > 0
+    ? getEnvVar('CORS_ORIGIN', false).split(',').map(o => o.trim())
+    : '*',
+  debug: getEnvVar('DEBUG', false) === 'true',
+  aegis: {
+    beneficiary: getEnvVar('AEGIS_BENEFICIARY'),
+    tokenAddress: getEnvVar('AEGIS_TOKEN_ADDRESS'),
+    apiKey: getEnvVar('AEGIS_API_KEY'),
+    apiUrl: getEnvVar('AEGIS_API_URL'),
+  }
 } as const;
 

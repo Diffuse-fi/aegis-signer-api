@@ -1,4 +1,5 @@
 export interface SignRequest {
-  address: string;
-  amount: string;
+  collateral_amount: string;
+  slippage: number;
+  collateral_asset: string;
 }
