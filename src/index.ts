@@ -165,7 +165,7 @@ app.use((err: Error, _req: Request, res: Response) => {
 });
 
 // Start Server
-app.listen(config.port, () => {
-  console.log(`🚀 Server running on port ${config.port}`);
+app.listen(config.port, '127.0.0.1', () => {
+  console.log(`🚀 Server running on port ${config.port} (bound to 127.0.0.1)`);
   console.log(`📝 Signer address: ${getSignerAddress()}`);
 });
