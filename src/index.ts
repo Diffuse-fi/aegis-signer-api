@@ -5,9 +5,10 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
 import fs from 'fs';
-import { isAddress, encodeAbiParameters, parseAbiParameters, type Hex } from 'viem';
+import { isAddress, encodeAbiParameters, parseAbiParameters, type Hex, createPublicClient, http, parseAbi } from 'viem';
+import { mainnet } from 'viem/chains';
 import { signMessage, getSignerAddress } from './signer.js';
-import { type SignRequest } from './types.js';
+import { type SignRequest, type RedeemRequest } from './types.js';
 import { config } from './config.js';
 
 // Load swagger.json
@@ -46,6 +47,12 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 // Health check
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', signer: getSignerAddress() });
+});
+
+// Initialize viem public client
+const publicClient = createPublicClient({
+  chain: mainnet,
+  transport: http(config.ethRpcUrl)
 });
 
 // Mint endpoint
@@ -123,12 +130,7 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
       // Print required fields to console
       if (config.debug) {
         console.log('--- Aegis Response Data ---');
-        console.log('yusd_amount:', yusd_amount);
-        console.log('slippage_adjusted_amount:', slippage_adjusted_amount);
-        console.log('expiry:', expiry);
-        console.log('nonce:', nonce);
-        console.log('additional_data:', additional_data);
-        console.log('signature:', responseSignature);
+        console.log(JSON.stringify(responseData, null, 2));
         console.log('---------------------------');
       }
 
@@ -152,6 +154,138 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
       });
     } else {
       console.warn('Unexpected Aegis response format:', responseData);
+      res.json(responseData);
+    }
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Redeem endpoint
+app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { yusd_amount, slippage, collateral_asset } = req.body as Partial<RedeemRequest>;
+
+    // 1. Strict Input Validation
+    if (!yusd_amount || typeof yusd_amount !== 'string' || !/^[1-9]\d*$/.test(yusd_amount)) {
+      res.status(400).json({ error: 'Invalid yusd_amount (must be a positive numeric string without leading zeros)' });
+      return;
+    }
+
+    if (slippage === undefined || typeof slippage !== 'number') {
+      res.status(400).json({ error: 'Invalid or missing slippage (must be a number)' });
+      return;
+    }
+
+    // Determine collateral asset
+    if (!collateral_asset) {
+      res.status(400).json({ error: 'Missing collateral_asset in request' });
+      return;
+    }
+
+    if (!isAddress(collateral_asset)) {
+      res.status(400).json({ error: 'Invalid collateral_asset address' });
+      return;
+    }
+
+    // 2. Fetch Instance and Index from Adapter
+    const adapterAddress = config.aegis.adapterAddress;
+    if (!adapterAddress || !isAddress(adapterAddress)) {
+      res.status(500).json({ error: 'Adapter address not configured correctly' });
+      return;
+    }
+
+    let instanceAddress: Hex;
+    let instanceIndex: bigint;
+
+    try {
+      const result = await publicClient.readContract({
+        address: adapterAddress as Hex,
+        abi: parseAbi(['function getNextAvailableInstance() external view returns (address, uint256)']),
+        functionName: 'getNextAvailableInstance',
+      });
+      instanceAddress = result[0] as Hex;
+      instanceIndex = result[1];
+    } catch (error: any) {
+      console.error('Failed to fetch instance from adapter:', error);
+      res.status(500).json({ error: `Failed to fetch instance: ${error.message}` });
+      return;
+    }
+
+    // 3. Construct Message and Sign
+    // Signing collateral_asset + yusd_amount
+    const textToSign = `${collateral_asset}${yusd_amount}`;
+    const signature = await signMessage(textToSign);
+
+    // 4. Call Aegis API
+    const payload = {
+      address: getSignerAddress(),
+      beneficiary_address: instanceAddress,
+      collateral_asset: collateral_asset,
+      yusd_amount,
+      signature,
+      slippage
+    };
+
+    if (config.debug) {
+      console.log('Sending payload to Aegis (Redeem):', payload);
+    } else {
+      console.log(`[Redeem] asset=${collateral_asset} amount=${yusd_amount} slippage=${slippage}`);
+    }
+
+    const aegisResponse = await fetch(config.aegis.redeemUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.aegis.apiKey
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!aegisResponse.ok) {
+      const errorText = await aegisResponse.text();
+      console.error('Aegis API error (Redeem):', aegisResponse.status, errorText);
+      res.status(aegisResponse.status).json({ error: `Aegis API failed: ${errorText}` });
+      return;
+    }
+
+    const responseData = await aegisResponse.json() as any;
+
+    // 4. Process Response
+    if (responseData.status === 'success' && responseData.data) {
+      const { order, signature: responseSignature } = responseData.data;
+      const { yusd_amount, collateral_amount, slippage_adjusted_amount, expiry, nonce, additional_data } = order;
+
+      // Print required fields to console
+      if (config.debug) {
+        console.log('--- Aegis Response Data (Redeem) ---');
+        console.log(JSON.stringify(responseData, null, 2));
+        console.log('---------------------------');
+      }
+
+      // Encode data for smart contract
+      const encodedData = encodeAbiParameters(
+        parseAbiParameters('uint256, uint256, uint256, uint256, uint256, uint256, bytes, bytes'),
+        [
+          BigInt(instanceIndex),
+          BigInt(yusd_amount),
+          BigInt(collateral_amount),
+          BigInt(slippage_adjusted_amount),
+          BigInt(expiry),
+          BigInt(nonce),
+          additional_data as Hex,
+          responseSignature as Hex
+        ]
+      );
+
+      res.json({
+        ...responseData,
+        encodedData,
+        signerSignature: signature
+      });
+    } else {
+      console.warn('Unexpected Aegis response format (Redeem):', responseData);
       res.json(responseData);
     }
 

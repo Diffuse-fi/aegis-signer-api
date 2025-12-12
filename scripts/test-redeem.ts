@@ -1,7 +1,7 @@
 const API_URL = 'http://localhost:3000';
 
 async function main() {
-  console.log('🧪 Starting manual test (Aegis Sign & Mint)...');
+  console.log('🧪 Starting manual test (Aegis Redeem)...');
 
   // 1. Health Check Test
   try {
@@ -15,19 +15,19 @@ async function main() {
     process.exit(1);
   }
 
-  // 2. Sign Test
+  // 2. Redeem Test
   try {
-    console.log('\n📝 Testing /mint...');
+    console.log('\n📝 Testing /redeem...');
 
     const payload = {
-      collateral_amount: "1000000",
+      yusd_amount: "2000000000000000000",
       slippage: 1,
       collateral_asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     };
 
     console.log('Sending Payload:', JSON.stringify(payload, null, 2));
 
-    const signRes = await fetch(`${API_URL}/mint`, {
+    const redeemRes = await fetch(`${API_URL}/redeem`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -35,13 +35,13 @@ async function main() {
       body: JSON.stringify(payload)
     });
 
-    if (!signRes.ok) {
-      const text = await signRes.text();
-      throw new Error(`API Error ${signRes.status}: ${text}`);
+    if (!redeemRes.ok) {
+      const text = await redeemRes.text();
+      throw new Error(`API Error ${redeemRes.status}: ${text}`);
     }
 
-    const data = await signRes.json();
-    console.log('\n✅ Aegis Response Received!');
+    const data = await redeemRes.json();
+    console.log('\n✅ Aegis Response Received (Redeem)!');
 
     if (data.signerSignature) {
       console.log('\n📝 Intermediate Signature (sent to Aegis):');
@@ -55,6 +55,7 @@ async function main() {
       if (data.data?.order) {
         console.log('\n📊 Order Details:');
         console.log(`yusd_amount:             ${data.data.order.yusd_amount}`);
+        console.log(`collateral_amount:       ${data.data.order.collateral_amount}`);
         console.log(`slippage_adjusted_amount:${data.data.order.slippage_adjusted_amount}`);
 
         const expiry = data.data.order.expiry;
@@ -74,8 +75,9 @@ async function main() {
     }
 
   } catch (error) {
-    console.error('Signing failed:', error);
+    console.error('Redeem failed:', error);
   }
 }
 
 main();
+

@@ -31,6 +31,9 @@ export const config = {
     tokenAddress: getEnvVar('AEGIS_TOKEN_ADDRESS'),
     apiKey: getEnvVar('AEGIS_API_KEY'),
     apiUrl: getEnvVar('AEGIS_API_URL'),
-  }
+    redeemUrl: getEnvVar('AEGIS_REDEEM_URL'),
+    adapterAddress: getEnvVar('AEGIS_ADAPTER_ADDRESS'),
+  },
+  ethRpcUrl: getEnvVar('ETH_RPC_URL')
 } as const;
 
