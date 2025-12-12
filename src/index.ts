@@ -165,7 +165,7 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
 // Redeem endpoint
 app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { yusd_amount, slippage, collateral_asset } = req.body as Partial<RedeemRequest>;
+    const { yusd_amount, slippage, collateral_asset, adapter_address, instance_address, instance_index } = req.body as Partial<RedeemRequest>;
 
     // 1. Strict Input Validation
     if (!yusd_amount || typeof yusd_amount !== 'string' || !/^[1-9]\d*$/.test(yusd_amount)) {
@@ -189,28 +189,55 @@ app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Pro
       return;
     }
 
-    // 2. Fetch Instance and Index from Adapter
-    const adapterAddress = config.aegis.adapterAddress;
-    if (!adapterAddress || !isAddress(adapterAddress)) {
-      res.status(500).json({ error: 'Adapter address not configured correctly' });
-      return;
-    }
+    // 2. Determine Instance Address and Index
+    // If all override parameters are provided, use them directly.
+    // Otherwise, fetch from the blockchain using the configured adapter.
+    let finalInstanceAddress: Hex;
+    let finalInstanceIndex: bigint;
 
-    let instanceAddress: Hex;
-    let instanceIndex: bigint;
+    if (adapter_address && instance_address && instance_index) {
+      if (!isAddress(adapter_address)) {
+        res.status(400).json({ error: 'Invalid adapter_address provided' });
+        return;
+      }
+      if (!isAddress(instance_address)) {
+        res.status(400).json({ error: 'Invalid instance_address provided' });
+        return;
+      }
 
-    try {
-      const result = await publicClient.readContract({
-        address: adapterAddress as Hex,
-        abi: parseAbi(['function getNextAvailableInstance() external view returns (address, uint256)']),
-        functionName: 'getNextAvailableInstance',
-      });
-      instanceAddress = result[0] as Hex;
-      instanceIndex = result[1];
-    } catch (error: any) {
-      console.error('Failed to fetch instance from adapter:', error);
-      res.status(500).json({ error: `Failed to fetch instance: ${error.message}` });
-      return;
+      finalInstanceAddress = instance_address as Hex;
+      try {
+        finalInstanceIndex = BigInt(instance_index);
+      } catch {
+        res.status(400).json({ error: 'Invalid instance_index provided' });
+        return;
+      }
+
+      if (config.debug) {
+        console.log(`[Redeem] Using manual override: instance=${finalInstanceAddress}, index=${finalInstanceIndex}`);
+      }
+
+    } else {
+      // Fetch Instance and Index from Adapter via Blockchain
+      const adapterAddress = config.aegis.adapterAddress;
+      if (!adapterAddress || !isAddress(adapterAddress)) {
+        res.status(500).json({ error: 'Adapter address not configured correctly' });
+        return;
+      }
+
+      try {
+        const result = await publicClient.readContract({
+          address: adapterAddress as Hex,
+          abi: parseAbi(['function getNextAvailableInstance() external view returns (address, uint256)']),
+          functionName: 'getNextAvailableInstance',
+        });
+        finalInstanceAddress = result[0] as Hex;
+        finalInstanceIndex = result[1];
+      } catch (error: any) {
+        console.error('Failed to fetch instance from adapter:', error);
+        res.status(500).json({ error: `Failed to fetch instance: ${error.message}` });
+        return;
+      }
     }
 
     // 3. Construct Message and Sign
@@ -221,7 +248,7 @@ app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Pro
     // 4. Call Aegis API
     const payload = {
       address: getSignerAddress(),
-      beneficiary_address: instanceAddress,
+      beneficiary_address: finalInstanceAddress,
       collateral_asset: collateral_asset,
       yusd_amount,
       signature,
@@ -268,7 +295,7 @@ app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Pro
       const encodedData = encodeAbiParameters(
         parseAbiParameters('uint256, uint256, uint256, uint256, uint256, uint256, bytes, bytes'),
         [
-          BigInt(instanceIndex),
+          BigInt(finalInstanceIndex),
           BigInt(yusd_amount),
           BigInt(collateral_amount),
           BigInt(slippage_adjusted_amount),

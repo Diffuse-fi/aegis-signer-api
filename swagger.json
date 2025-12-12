@@ -124,6 +124,21 @@
                     "type": "string",
                     "description": "Address of the collateral asset to receive",
                     "example": "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+                  },
+                  "adapter_address": {
+                    "type": "string",
+                    "description": "Optional: Manual override for Aegis adapter address",
+                    "example": "0x..."
+                  },
+                  "instance_address": {
+                    "type": "string",
+                    "description": "Optional: Manual override for instance address",
+                    "example": "0x..."
+                  },
+                  "instance_index": {
+                    "type": "string",
+                    "description": "Optional: Manual override for instance index",
+                    "example": "0"
                   }
                 }
               }
