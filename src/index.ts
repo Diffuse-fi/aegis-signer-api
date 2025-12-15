@@ -58,7 +58,7 @@ const publicClient = createPublicClient({
 // Mint endpoint
 app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { collateral_amount, slippage, collateral_asset } = req.body as Partial<SignRequest>;
+    const { collateral_amount, slippage, collateral_asset, adapter_address } = req.body as Partial<SignRequest>;
 
     // 1. Strict Input Validation
     if (!collateral_amount || typeof collateral_amount !== 'string' || !/^[1-9]\d*$/.test(collateral_amount)) {
@@ -82,6 +82,22 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
       return;
     }
 
+    // Determine mint adapter / beneficiary address
+    let finalAdapterAddress: Hex;
+    if (adapter_address) {
+      if (!isAddress(adapter_address)) {
+        res.status(400).json({ error: 'Invalid adapter_address provided' });
+        return;
+      }
+      finalAdapterAddress = adapter_address as Hex;
+    } else {
+      if (!isAddress(config.aegis.beneficiary)) {
+        res.status(500).json({ error: 'Mint adapter address not configured correctly (AEGIS_BENEFICIARY)' });
+        return;
+      }
+      finalAdapterAddress = config.aegis.beneficiary as Hex;
+    }
+
     // 2. Construct Message and Sign
     // Signing collateral_asset + amount as per original logic requirements
     const textToSign = `${collateral_asset}${collateral_amount}`;
@@ -90,7 +106,7 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
     // 3. Call Aegis API
     const payload = {
       address: getSignerAddress(),
-      beneficiary_address: config.aegis.beneficiary,
+      beneficiary_address: finalAdapterAddress,
       collateral_asset: collateral_asset,
       collateral_amount,
       signature,
@@ -101,7 +117,7 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
     if (config.debug) {
       console.log('Sending payload to Aegis:', payload);
     } else {
-      console.log(`[Mint] asset=${collateral_asset} amount=${collateral_amount} slippage=${slippage}`);
+      console.log(`[Mint] asset=${collateral_asset} amount=${collateral_amount} slippage=${slippage} adapter=${finalAdapterAddress}`);
     }
 
     const aegisResponse = await fetch(config.aegis.apiUrl, {

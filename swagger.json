@@ -19,7 +19,7 @@
     "/mint": {
       "post": {
         "summary": "Mint a transaction",
-        "description": "Signs a collateral amount and asset, then forwards the request to the Aegis API.",
+        "description": "Signs a collateral amount and asset, then forwards the request to the Aegis API. Optionally accepts an adapter_address override.",
         "requestBody": {
           "required": true,
           "content": {
@@ -42,6 +42,11 @@
                     "type": "string",
                     "description": "Address of the collateral asset",
                     "example": "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+                  },
+                  "adapter_address": {
+                    "type": "string",
+                    "description": "Optional: Mint adapter override (beneficiary_address sent to Aegis). If omitted, server uses AEGIS_BENEFICIARY.",
+                    "example": "0x..."
                   }
                 }
               }

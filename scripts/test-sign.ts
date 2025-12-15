@@ -22,7 +22,8 @@ async function main() {
     const payload = {
       collateral_amount: "1000000",
       slippage: 1,
-      collateral_asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      collateral_asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      // adapter_address: "0x..." // Optional mint adapter override (defaults to AEGIS_BENEFICIARY)
     };
 
     console.log('Sending Payload:', JSON.stringify(payload, null, 2));

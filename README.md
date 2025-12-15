@@ -65,7 +65,8 @@ Signs a request to mint tokens and forwards it to the Aegis API.
 {
   "collateral_amount": "1000000",
   "slippage": 1,
-  "collateral_asset": "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+  "collateral_asset": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+  "adapter_address": "0x..." // Optional override (defaults to AEGIS_BENEFICIARY)
 }
 ```
 
