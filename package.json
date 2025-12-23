@@ -6,10 +6,13 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon --watch src --exec tsx src/index.ts",
+    "dev:pt": "nodemon --watch src --exec tsx src/pt-api.ts",
     "build": "tsc",
     "test:sign": "tsx scripts/test-sign.ts",
     "test:redeem": "tsx scripts/test-redeem.ts",
-    "start": "node dist/index.js"
+    "test:pt": "tsx scripts/test-pt.ts",
+    "start": "node dist/index.js",
+    "start:pt": "node dist/pt-api.js"
   },
   "repository": {
     "type": "git",

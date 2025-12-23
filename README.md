@@ -41,10 +41,16 @@ A secure Express.js service for interacting with the Aegis protocol. It acts as 
     ```
     The server runs on `http://127.0.0.1:3000` by default.
 
-2.  **Swagger Documentation**
+2.  **Start the PT API (separate process)**
+    ```bash
+    npm run dev:pt
+    ```
+    The PT API runs on `http://127.0.0.1:3100` by default (configurable via `PT_API_PORT`).
+
+3.  **Swagger Documentation**
     Visit `http://127.0.0.1:3000/api-docs` to view the interactive API documentation.
 
-3.  **Manual Testing**
+4.  **Manual Testing**
     You can run the included test scripts to verify functionality:
     ```bash
     # Test Mint Flow
