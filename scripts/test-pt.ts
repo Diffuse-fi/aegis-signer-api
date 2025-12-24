@@ -60,6 +60,44 @@ async function main() {
     console.error('getPtAmount failed:', error);
     process.exit(1);
   }
+
+  // 3) previewBorrow
+  try {
+    console.log('\n💰 Testing /previewBorrow...');
+
+    const payload = {
+      vault_address: VAULT,
+      strategy_id: STRATEGY_ID,
+      collateral_type: '0', // 0 or 1
+      collateral_amount: USDC_AMOUNT,
+      assets_to_borrow: '1000000', // 1 USDC
+      data: '0x',
+    };
+
+    console.log('Sending Payload:', JSON.stringify(payload, null, 2));
+
+    const res = await fetch(`${API_URL}/previewBorrow`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+
+    console.log(`Status: ${res.status}`);
+    console.log('Response:', typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error('previewBorrow failed:', error);
+    process.exit(1);
+  }
 }
 
 main();

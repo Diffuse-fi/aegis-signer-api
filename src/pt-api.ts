@@ -15,6 +15,10 @@ const erc20Abi = parseAbi(['function approve(address spender, uint256 amount) ex
 const viewerAbi = parseAbi([
   'function simulatePtBuy(address from, address vault, uint256 strategyId, uint256 baseAssetAmount, bytes data) external returns (bool finished, uint256[] amounts)',
 ]);
+const vaultAbi = parseAbi([
+  'function availableLiquidity() external view returns (uint256)',
+  'function previewBorrow(address forUser, uint256 strategyId, uint8 collateralType, uint256 collateralAmount, uint256 assetsToBorrow, bytes memory data) external returns (uint256[] memory assetsReceived)',
+]);
 
 type EthCallManyTx = {
   from?: Hex;
@@ -235,6 +239,216 @@ app.all('/getPtAmount', async (req: Request, res: Response, next: NextFunction):
     const amounts = decoded[1].map((x) => x.toString());
 
     res.status(200).json({ finished, amounts });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /previewBorrow
+// Body: { vault_address: "0x...", strategy_id: "1", collateral_type: "0", collateral_amount: "123", assets_to_borrow: "456", data: "0x..." }
+// Also supports camelCase keys and query params for convenience.
+app.all('/previewBorrow', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (req.method !== 'POST' && req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    const vaultRaw =
+      pickString((req.body as any)?.vault_address) ??
+      pickString((req.body as any)?.vaultAddress) ??
+      pickString((req.body as any)?.vault) ??
+      pickString((req.query as any)?.vault_address) ??
+      pickString((req.query as any)?.vaultAddress) ??
+      pickString((req.query as any)?.vault);
+
+    const strategyIdRaw =
+      pickString((req.body as any)?.strategy_id) ??
+      pickString((req.body as any)?.strategyId) ??
+      pickString((req.query as any)?.strategy_id) ??
+      pickString((req.query as any)?.strategyId);
+
+    const collateralTypeRaw =
+      pickString((req.body as any)?.collateral_type) ??
+      pickString((req.body as any)?.collateralType) ??
+      pickString((req.query as any)?.collateral_type) ??
+      pickString((req.query as any)?.collateralType);
+
+    const collateralAmountRaw =
+      pickString((req.body as any)?.collateral_amount) ??
+      pickString((req.body as any)?.collateralAmount) ??
+      pickString((req.query as any)?.collateral_amount) ??
+      pickString((req.query as any)?.collateralAmount);
+
+    const assetsToBorrowRaw =
+      pickString((req.body as any)?.assets_to_borrow) ??
+      pickString((req.body as any)?.assetsToBorrow) ??
+      pickString((req.query as any)?.assets_to_borrow) ??
+      pickString((req.query as any)?.assetsToBorrow);
+
+    const dataRaw =
+      pickString((req.body as any)?.data) ??
+      pickString((req.query as any)?.data) ??
+      '0x';
+
+    if (!vaultRaw) {
+      res.status(400).json({ error: 'Missing vault_address' });
+      return;
+    }
+    if (!strategyIdRaw) {
+      res.status(400).json({ error: 'Missing strategy_id' });
+      return;
+    }
+    if (collateralTypeRaw === undefined || collateralTypeRaw === null) {
+      res.status(400).json({ error: 'Missing collateral_type' });
+      return;
+    }
+    if (!collateralAmountRaw) {
+      res.status(400).json({ error: 'Missing collateral_amount' });
+      return;
+    }
+    if (!assetsToBorrowRaw) {
+      res.status(400).json({ error: 'Missing assets_to_borrow' });
+      return;
+    }
+
+    if (!isAddress(vaultRaw)) {
+      res.status(400).json({ error: 'Invalid vault_address' });
+      return;
+    }
+
+    const vault = vaultRaw as Address;
+    const strategyId = parseBigIntParam(strategyIdRaw, 'strategy_id');
+    const collateralType = parseBigIntParam(collateralTypeRaw, 'collateral_type');
+    if (collateralType !== 0n && collateralType !== 1n) {
+      res.status(400).json({ error: 'Invalid collateral_type (must be 0 or 1)' });
+      return;
+    }
+    const collateralAmount = parseBigIntParam(collateralAmountRaw, 'collateral_amount');
+    const assetsToBorrow = parseBigIntParam(assetsToBorrowRaw, 'assets_to_borrow');
+
+    let data: Hex = '0x' as Hex;
+    if (dataRaw && dataRaw.startsWith('0x')) {
+      data = dataRaw as Hex;
+    } else if (dataRaw) {
+      res.status(400).json({ error: 'Invalid data (must be hex string starting with 0x)' });
+      return;
+    }
+
+    const approveData = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: 'approve',
+      args: [vault, MAX_UINT256],
+    });
+
+    const availableLiquidityData = encodeFunctionData({
+      abi: vaultAbi,
+      functionName: 'availableLiquidity',
+      args: [],
+    });
+
+    const collateralTypeNum = Number(collateralType);
+    if (ptConfig.debug) {
+      console.log('[previewBorrow] Parameters:', {
+        forUser: ptConfig.usdcHolder,
+        strategyId: strategyId.toString(),
+        collateralType: collateralTypeNum,
+        collateralAmount: collateralAmount.toString(),
+        assetsToBorrow: assetsToBorrow.toString(),
+        data: data,
+      });
+    }
+
+    const previewBorrowData = encodeFunctionData({
+      abi: vaultAbi,
+      functionName: 'previewBorrow',
+      args: [ptConfig.usdcHolder, strategyId, collateralTypeNum, collateralAmount, assetsToBorrow, data],
+    });
+
+    if (ptConfig.debug) {
+      console.log('[previewBorrow] Encoded data:', previewBorrowData);
+    }
+
+    const bundles: EthCallManyBundle[] = [
+      {
+        transactions: [
+          // 1) approve from USDC holder to USDC contract (spender=vault, amount=max)
+          { from: ptConfig.usdcHolder, to: USDC_ADDRESS, data: approveData },
+          // 2) availableLiquidity call from ZERO_ADDRESS to vault
+          { from: ZERO_ADDRESS, to: vault, data: availableLiquidityData },
+          // 3) previewBorrow call from ZERO_ADDRESS to vault (as per user requirement)
+          { from: ZERO_ADDRESS, to: vault, data: previewBorrowData },
+        ],
+      },
+    ];
+
+    const rpcJson = await ethCallMany(bundles);
+    const bundleResult = rpcJson?.result?.[0];
+    const results = Array.isArray(bundleResult) ? bundleResult : [];
+
+    // Check approve result (index 0)
+    const approveResult = results[0];
+    if (approveResult && typeof approveResult === 'object' && (approveResult as any).error) {
+      const err = (approveResult as any).error;
+      const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      res.status(502).json({ error: `eth_callMany approve failed: ${msg}`, raw: approveResult });
+      return;
+    }
+
+    // Check availableLiquidity result (index 1)
+    const liquidityResult = results[1];
+    if (liquidityResult && typeof liquidityResult === 'object' && (liquidityResult as any).error) {
+      const err = (liquidityResult as any).error;
+      const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      res.status(502).json({ error: `eth_callMany availableLiquidity failed: ${msg}`, raw: liquidityResult });
+      return;
+    }
+
+    const liquidityOutput = extractEthCallManyOutput(liquidityResult);
+    if (!liquidityOutput) {
+      res.status(502).json({ error: 'Unexpected eth_callMany response shape (missing availableLiquidity output)', raw: rpcJson?.result });
+      return;
+    }
+
+    const availableLiquidity = decodeFunctionResult({
+      abi: vaultAbi,
+      functionName: 'availableLiquidity',
+      data: liquidityOutput,
+    }) as unknown as bigint;
+
+    if (availableLiquidity < assetsToBorrow) {
+      res.status(400).json({
+        error: 'Insufficient liquidity in vault',
+        availableLiquidity: availableLiquidity.toString(),
+        requestedBorrow: assetsToBorrow.toString(),
+      });
+      return;
+    }
+
+    // Check previewBorrow result (index 2)
+    const previewBorrowResult = results[2];
+    if (previewBorrowResult && typeof previewBorrowResult === 'object' && (previewBorrowResult as any).error) {
+      const err = (previewBorrowResult as any).error;
+      const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      res.status(502).json({ error: `eth_callMany previewBorrow failed: ${msg}`, raw: previewBorrowResult });
+      return;
+    }
+
+    const output = extractEthCallManyOutput(previewBorrowResult);
+    if (!output) {
+      res.status(502).json({ error: 'Unexpected eth_callMany response shape (missing previewBorrow output)', raw: rpcJson?.result });
+      return;
+    }
+
+    const decoded = decodeFunctionResult({
+      abi: vaultAbi,
+      functionName: 'previewBorrow',
+      data: output,
+    }) as unknown as readonly bigint[];
+
+    const assetsReceived = decoded.map((x) => x.toString());
+
+    res.status(200).json({ assetsReceived });
   } catch (err) {
     next(err);
   }
