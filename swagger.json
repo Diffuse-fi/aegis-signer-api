@@ -379,9 +379,11 @@
             "in": "query",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "default": "10000000000000000000",
+              "example": "10000000000000000000"
             },
-            "description": "Target amount of PT tokens to buy"
+            "description": "Target amount of PT tokens to buy (default: 10000000000000000000 = 10 PT with 18 decimals)"
           },
           {
             "name": "vault_address",
@@ -471,8 +473,9 @@
                 "properties": {
                   "target_pt_amount": {
                     "type": "string",
-                    "description": "Target amount of PT tokens to buy. Also accepts camelCase: targetPtAmount",
-                    "example": "1000000"
+                    "description": "Target amount of PT tokens to buy (default: 10000000000000000000 = 10 PT with 18 decimals). Also accepts camelCase: targetPtAmount",
+                    "example": "10000000000000000000",
+                    "default": "10000000000000000000"
                   },
                   "vault_address": {
                     "type": "string",
