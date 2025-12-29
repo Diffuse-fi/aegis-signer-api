@@ -199,7 +199,7 @@
     "/health": {
       "get": {
         "summary": "Health check",
-        "description": "Returns the status of the server and the signer address.",
+        "description": "Returns the status of the server. For PT API, returns service name, USDC holder address, and viewer address.",
         "responses": {
           "200": {
             "description": "Server is healthy",
@@ -212,14 +212,513 @@
                       "type": "string",
                       "example": "ok"
                     },
+                    "service": {
+                      "type": "string",
+                      "example": "pt-api",
+                      "description": "Service name (pt-api for PT API endpoints)"
+                    },
+                    "usdcHolder": {
+                      "type": "string",
+                      "example": "0x123...",
+                      "description": "USDC holder address used for simulations"
+                    },
+                    "viewerAddress": {
+                      "type": "string",
+                      "example": "0x456...",
+                      "description": "Viewer contract address"
+                    },
                     "signer": {
                       "type": "string",
-                      "example": "0x123..."
+                      "example": "0x123...",
+                      "description": "Signer address (for main API)"
                     }
                   }
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/getPtAmount": {
+      "get": {
+        "summary": "Get PT amount for USDC",
+        "description": "Simulates PT purchase to calculate how much PT tokens can be bought with a given USDC amount. Supports both GET (query params) and POST (body) methods.",
+        "parameters": [
+          {
+            "name": "usdc_amount",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount of USDC to spend (e.g., '1000000' for 1 USDC if decimals are 6)"
+          },
+          {
+            "name": "vault_address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault contract address"
+          },
+          {
+            "name": "strategy_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Strategy ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "finished": {
+                      "type": "boolean",
+                      "description": "Whether the simulation finished successfully"
+                    },
+                    "amounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Array of amounts received (PT tokens)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Contract simulation error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Get PT amount for USDC",
+        "description": "Simulates PT purchase to calculate how much PT tokens can be bought with a given USDC amount. Supports both GET (query params) and POST (body) methods.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["usdc_amount", "vault_address", "strategy_id"],
+                "properties": {
+                  "usdc_amount": {
+                    "type": "string",
+                    "description": "Amount of USDC to spend (e.g., '1000000' for 1 USDC if decimals are 6). Also accepts camelCase: usdcAmount",
+                    "example": "1000000"
+                  },
+                  "vault_address": {
+                    "type": "string",
+                    "description": "Vault contract address. Also accepts: vaultAddress, vault",
+                    "example": "0x11D79cb50f7ac27A208C5D435440221729837485"
+                  },
+                  "strategy_id": {
+                    "type": "string",
+                    "description": "Strategy ID. Also accepts camelCase: strategyId",
+                    "example": "0"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "finished": {
+                      "type": "boolean",
+                      "description": "Whether the simulation finished successfully"
+                    },
+                    "amounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Array of amounts received (PT tokens)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Contract simulation error"
+          }
+        }
+      }
+    },
+    "/getPtBuyBSLow": {
+      "get": {
+        "summary": "Get USDC amount needed for target PT amount",
+        "description": "Simulates PT purchase to calculate how much USDC is needed to buy a target amount of PT tokens. Supports both GET (query params) and POST (body) methods.",
+        "parameters": [
+          {
+            "name": "target_pt_amount",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Target amount of PT tokens to buy"
+          },
+          {
+            "name": "vault_address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault contract address"
+          },
+          {
+            "name": "strategy_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Strategy ID"
+          },
+          {
+            "name": "precision_bps",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "50"
+            },
+            "description": "Precision in basis points (default: 50 = 0.5%)"
+          },
+          {
+            "name": "data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "0x"
+            },
+            "description": "Additional data (hex string, default: 0x)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "finished": {
+                      "type": "boolean",
+                      "description": "Whether the simulation finished successfully"
+                    },
+                    "baseAssetAmount": {
+                      "type": "string",
+                      "description": "Amount of USDC needed to buy the target PT amount"
+                    },
+                    "amounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Array of amounts received"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Contract simulation error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Get USDC amount needed for target PT amount",
+        "description": "Simulates PT purchase to calculate how much USDC is needed to buy a target amount of PT tokens. Supports both GET (query params) and POST (body) methods.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["target_pt_amount", "vault_address", "strategy_id"],
+                "properties": {
+                  "target_pt_amount": {
+                    "type": "string",
+                    "description": "Target amount of PT tokens to buy. Also accepts camelCase: targetPtAmount",
+                    "example": "1000000"
+                  },
+                  "vault_address": {
+                    "type": "string",
+                    "description": "Vault contract address. Also accepts: vaultAddress, vault",
+                    "example": "0x11D79cb50f7ac27A208C5D435440221729837485"
+                  },
+                  "strategy_id": {
+                    "type": "string",
+                    "description": "Strategy ID. Also accepts camelCase: strategyId",
+                    "example": "0"
+                  },
+                  "precision_bps": {
+                    "type": "string",
+                    "description": "Precision in basis points (default: 50 = 0.5%). Also accepts camelCase: precisionBps",
+                    "example": "50",
+                    "default": "50"
+                  },
+                  "data": {
+                    "type": "string",
+                    "description": "Additional data (hex string, default: 0x)",
+                    "example": "0x",
+                    "default": "0x"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "finished": {
+                      "type": "boolean",
+                      "description": "Whether the simulation finished successfully"
+                    },
+                    "baseAssetAmount": {
+                      "type": "string",
+                      "description": "Amount of USDC needed to buy the target PT amount"
+                    },
+                    "amounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Array of amounts received"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Contract simulation error"
+          }
+        }
+      }
+    },
+    "/previewBorrow": {
+      "get": {
+        "summary": "Preview borrow operation",
+        "description": "Previews a borrow operation to see what assets would be received. Supports both GET (query params) and POST (body) methods.",
+        "parameters": [
+          {
+            "name": "vault_address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault contract address"
+          },
+          {
+            "name": "strategy_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Strategy ID"
+          },
+          {
+            "name": "collateral_type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Collateral type (0 or 1)"
+          },
+          {
+            "name": "collateral_amount",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount of collateral"
+          },
+          {
+            "name": "assets_to_borrow",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount of assets to borrow"
+          },
+          {
+            "name": "data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "0x"
+            },
+            "description": "Additional data (hex string, default: 0x)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "assetsReceived": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Array of assets that would be received"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters) or insufficient liquidity"
+          },
+          "502": {
+            "description": "Contract simulation error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Preview borrow operation",
+        "description": "Previews a borrow operation to see what assets would be received. Supports both GET (query params) and POST (body) methods.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["vault_address", "strategy_id", "collateral_type", "collateral_amount", "assets_to_borrow"],
+                "properties": {
+                  "vault_address": {
+                    "type": "string",
+                    "description": "Vault contract address. Also accepts: vaultAddress, vault",
+                    "example": "0x11D79cb50f7ac27A208C5D435440221729837485"
+                  },
+                  "strategy_id": {
+                    "type": "string",
+                    "description": "Strategy ID. Also accepts camelCase: strategyId",
+                    "example": "0"
+                  },
+                  "collateral_type": {
+                    "type": "string",
+                    "description": "Collateral type (0 or 1). Also accepts camelCase: collateralType",
+                    "example": "0"
+                  },
+                  "collateral_amount": {
+                    "type": "string",
+                    "description": "Amount of collateral. Also accepts camelCase: collateralAmount",
+                    "example": "1000000"
+                  },
+                  "assets_to_borrow": {
+                    "type": "string",
+                    "description": "Amount of assets to borrow. Also accepts camelCase: assetsToBorrow",
+                    "example": "500000"
+                  },
+                  "data": {
+                    "type": "string",
+                    "description": "Additional data (hex string, default: 0x)",
+                    "example": "0x",
+                    "default": "0x"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "assetsReceived": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Array of assets that would be received"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters) or insufficient liquidity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "availableLiquidity": {
+                      "type": "string",
+                      "description": "Available liquidity in vault (if insufficient)"
+                    },
+                    "requestedBorrow": {
+                      "type": "string",
+                      "description": "Requested borrow amount (if insufficient)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Contract simulation error"
           }
         }
       }
