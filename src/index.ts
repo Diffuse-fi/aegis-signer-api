@@ -33,7 +33,7 @@ app.use(express.json({ limit: '10kb' })); // Limit body size to prevent DoS
 // Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: 5000, // Limit each IP to 5000 requests per windowMs
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   message: 'Too many requests from this IP, please try again later.',
@@ -250,7 +250,12 @@ app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Pro
         finalInstanceAddress = result[0] as Hex;
         finalInstanceIndex = result[1];
       } catch (error: any) {
-        console.error('Failed to fetch instance from adapter:', error);
+        console.error('[Contract Error] Failed to fetch instance from adapter:', {
+          adapterAddress,
+          error: error.message,
+          stack: error.stack,
+          details: error
+        });
         res.status(500).json({ error: `Failed to fetch instance: ${error.message}` });
         return;
       }

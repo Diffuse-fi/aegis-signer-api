@@ -121,7 +121,7 @@ app.use(express.json({ limit: '10kb' }));
 
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 5000,
   standardHeaders: true,
   legacyHeaders: false,
   message: 'Too many requests from this IP, please try again later.',
@@ -219,6 +219,14 @@ app.all('/getPtAmount', async (req: Request, res: Response, next: NextFunction):
     if (secondResult && typeof secondResult === 'object' && (secondResult as any).error) {
       const err = (secondResult as any).error;
       const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      console.error('[Contract Error] eth_callMany simulatePtBuy failed:', {
+        error: err,
+        message: msg,
+        raw: secondResult,
+        vault,
+        strategyId,
+        usdcAmount: usdcAmount.toString()
+      });
       res.status(502).json({ error: `eth_callMany simulatePtBuy failed: ${msg}`, raw: secondResult });
       return;
     }
@@ -391,6 +399,13 @@ app.all('/previewBorrow', async (req: Request, res: Response, next: NextFunction
     if (approveResult && typeof approveResult === 'object' && (approveResult as any).error) {
       const err = (approveResult as any).error;
       const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      console.error('[Contract Error] eth_callMany approve failed:', {
+        error: err,
+        message: msg,
+        raw: approveResult,
+        vault,
+        strategyId
+      });
       res.status(502).json({ error: `eth_callMany approve failed: ${msg}`, raw: approveResult });
       return;
     }
@@ -400,6 +415,12 @@ app.all('/previewBorrow', async (req: Request, res: Response, next: NextFunction
     if (liquidityResult && typeof liquidityResult === 'object' && (liquidityResult as any).error) {
       const err = (liquidityResult as any).error;
       const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      console.error('[Contract Error] eth_callMany availableLiquidity failed:', {
+        error: err,
+        message: msg,
+        raw: liquidityResult,
+        vault
+      });
       res.status(502).json({ error: `eth_callMany availableLiquidity failed: ${msg}`, raw: liquidityResult });
       return;
     }
@@ -430,6 +451,16 @@ app.all('/previewBorrow', async (req: Request, res: Response, next: NextFunction
     if (previewBorrowResult && typeof previewBorrowResult === 'object' && (previewBorrowResult as any).error) {
       const err = (previewBorrowResult as any).error;
       const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      console.error('[Contract Error] eth_callMany previewBorrow failed:', {
+        error: err,
+        message: msg,
+        raw: previewBorrowResult,
+        vault,
+        strategyId,
+        collateralType: collateralType.toString(),
+        collateralAmount: collateralAmount.toString(),
+        assetsToBorrow: assetsToBorrow.toString()
+      });
       res.status(502).json({ error: `eth_callMany previewBorrow failed: ${msg}`, raw: previewBorrowResult });
       return;
     }
