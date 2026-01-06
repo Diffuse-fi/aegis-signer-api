@@ -3,15 +3,27 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { decodeFunctionResult, encodeFunctionData, isAddress, parseAbi, decodeErrorResult, type Address, type Hex } from 'viem';
 import { ptConfig } from './pt-config.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const USDC_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as const satisfies Address;
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const satisfies Address;
+// Empty EOA address used for token operations (tokens are transferred here from rich addresses)
+const EMPTY_EOA = '0x1111111111111111111111111111111111111111' as const satisfies Address;
 
 const MAX_UINT256 = (2n ** 256n) - 1n;
 
-const erc20Abi = parseAbi(['function approve(address spender, uint256 amount) external returns (bool)']);
+const erc20Abi = parseAbi([
+  'function approve(address spender, uint256 amount) external returns (bool)',
+  'function balanceOf(address account) external view returns (uint256)',
+  'function transfer(address to, uint256 amount) external returns (bool)',
+]);
 const viewerAbi = parseAbi([
   'function simulatePtBuy(address from, address vault, uint256 strategyId, uint256 baseAssetAmount, bytes data) external returns (bool finished, uint256[] amounts)',
   'function simulatePtBuyBSLow(address from, address vault, uint256 strategyId, uint256 targetPtAmount, uint256 precisionBps, bytes memory data) external returns (bool finished, uint256 baseAssetAmount, uint256[] memory amounts)',
@@ -20,6 +32,43 @@ const vaultAbi = parseAbi([
   'function availableLiquidity() external view returns (uint256)',
   'function previewBorrow(address forUser, uint256 strategyId, uint8 collateralType, uint256 collateralAmount, uint256 assetsToBorrow, bytes memory data) external returns (uint256[] memory assetsReceived)',
 ]);
+const adapterAbi = parseAbi([
+  'function TOKEN_IN() external view returns (address)',
+  'function TOKEN_OUT() external view returns (address)',
+  'function buy(uint256 amountIn, uint256 positionId, uint256 minAmountOut, bytes memory data) external returns (uint256 amountOut, bool finished)',
+]);
+
+// Mapping: TOKEN_IN address -> address that owns large amount of this token
+// Loaded from token-holders.json file
+let tokenInHolderMap: Record<Address, Address> = {};
+
+try {
+  const tokenHoldersPath = join(__dirname, '..', 'token-holders.json');
+  const tokenHoldersData = readFileSync(tokenHoldersPath, 'utf-8');
+  const parsed = JSON.parse(tokenHoldersData) as Record<string, string>;
+
+  // Validate that all addresses are valid
+  for (const [token, holder] of Object.entries(parsed)) {
+    if (!isAddress(token)) {
+      console.warn(`[Warning] Invalid token address in token-holders.json: ${token}`);
+      continue;
+    }
+    if (!isAddress(holder)) {
+      console.warn(`[Warning] Invalid holder address in token-holders.json for token ${token}: ${holder}`);
+      continue;
+    }
+    tokenInHolderMap[token as Address] = holder as Address;
+  }
+
+  console.log(`[PT-API] Loaded ${Object.keys(tokenInHolderMap).length} token holder mappings from token-holders.json`);
+} catch (err: any) {
+  if (err.code === 'ENOENT') {
+    console.warn('[PT-API] token-holders.json not found, using empty mapping');
+  } else {
+    console.error('[PT-API] Failed to load token-holders.json:', err.message);
+    console.warn('[PT-API] Using empty mapping');
+  }
+}
 
 type EthCallManyTx = {
   from?: Hex;
@@ -61,10 +110,35 @@ const extractEthCallManyOutput = (result: unknown): Hex | null => {
   if (typeof result === 'string' && result.startsWith('0x')) return result as Hex;
   if (!result || typeof result !== 'object') return null;
 
+  // If result is an array, try to extract from first element
+  if (Array.isArray(result) && result.length > 0) {
+    return extractEthCallManyOutput(result[0]);
+  }
+
   const r = result as Record<string, unknown>;
   const candidates = [r.output, r.returnData, r.data, r.result, r.value];
   for (const c of candidates) {
     if (typeof c === 'string' && c.startsWith('0x')) return c as Hex;
+  }
+  return null;
+};
+
+const decodeAddress = (output: Hex, abi: typeof adapterAbi, functionName: 'TOKEN_IN' | 'TOKEN_OUT'): Address | null => {
+  try {
+    const decoded = decodeFunctionResult({
+      abi,
+      functionName,
+      data: output,
+    }) as unknown as Address;
+    if (isAddress(decoded)) {
+      return decoded;
+    }
+  } catch {
+    // Fallback: parse address directly from hex (last 40 chars = 20 bytes)
+    const addr = output.slice(-40);
+    if (isAddress(`0x${addr}`)) {
+      return `0x${addr}` as Address;
+    }
   }
   return null;
 };
@@ -657,6 +731,381 @@ app.all('/previewBorrow', async (req: Request, res: Response, next: NextFunction
     const assetsReceived = decoded.map((x) => x.toString());
 
     res.status(200).json({ assetsReceived });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /simulateTokenSale
+// Body: { adapters: ["0x...", "0x..."], amount: "123", position_id: "0" (optional), min_amount_out: "0" (optional), data: "0x" (optional) }
+// Also supports camelCase keys and query params for convenience.
+app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (req.method !== 'POST' && req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    const adaptersRaw = (req.body as any)?.adapters ?? (req.query as any)?.adapters;
+    const amountRaw =
+      pickString((req.body as any)?.amount) ??
+      pickString((req.query as any)?.amount);
+
+    const positionIdRaw =
+      pickString((req.body as any)?.position_id) ??
+      pickString((req.body as any)?.positionId) ??
+      pickString((req.query as any)?.position_id) ??
+      pickString((req.query as any)?.positionId) ??
+      '0';
+
+    const minAmountOutRaw =
+      pickString((req.body as any)?.min_amount_out) ??
+      pickString((req.body as any)?.minAmountOut) ??
+      pickString((req.query as any)?.min_amount_out) ??
+      pickString((req.query as any)?.minAmountOut) ??
+      '0';
+
+    const dataRaw =
+      pickString((req.body as any)?.data) ??
+      pickString((req.query as any)?.data) ??
+      '0x';
+
+    if (!adaptersRaw) {
+      res.status(400).json({ error: 'Missing adapters' });
+      return;
+    }
+    if (!amountRaw) {
+      res.status(400).json({ error: 'Missing amount' });
+      return;
+    }
+
+    let adapters: Address[];
+    if (Array.isArray(adaptersRaw)) {
+      adapters = adaptersRaw.map((a: any) => {
+        const addr = typeof a === 'string' ? a : String(a);
+        if (!isAddress(addr)) {
+          throw new Error(`Invalid adapter address: ${addr}`);
+        }
+        return addr as Address;
+      });
+    } else if (typeof adaptersRaw === 'string') {
+      // Try to parse as JSON array
+      try {
+        const parsed = JSON.parse(adaptersRaw);
+        if (!Array.isArray(parsed)) {
+          throw new Error('adapters must be an array');
+        }
+        adapters = parsed.map((a: any) => {
+          const addr = typeof a === 'string' ? a : String(a);
+          if (!isAddress(addr)) {
+            throw new Error(`Invalid adapter address: ${addr}`);
+          }
+          return addr as Address;
+        });
+      } catch {
+        res.status(400).json({ error: 'Invalid adapters format (must be array of addresses)' });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: 'Invalid adapters format (must be array)' });
+      return;
+    }
+
+    if (adapters.length === 0) {
+      res.status(400).json({ error: 'adapters array cannot be empty' });
+      return;
+    }
+
+    const amount = parseBigIntParam(amountRaw, 'amount');
+    const positionId = parseBigIntParam(positionIdRaw, 'position_id');
+    const minAmountOut = parseBigIntParam(minAmountOutRaw, 'min_amount_out');
+
+    let data: Hex = '0x' as Hex;
+    if (dataRaw && dataRaw.startsWith('0x')) {
+      data = dataRaw as Hex;
+    } else if (dataRaw && dataRaw !== '0x') {
+      res.status(400).json({ error: 'Invalid data (must be hex string starting with 0x)' });
+      return;
+    }
+
+    // Step 1: Get TOKEN_IN for first adapter and verify it's in the mapping
+    const firstAdapterTokenInData = encodeFunctionData({
+      abi: adapterAbi,
+      functionName: 'TOKEN_IN',
+      args: [],
+    });
+
+    const firstTokenInBundle: EthCallManyBundle[] = [
+      {
+        transactions: [
+          { from: ZERO_ADDRESS, to: adapters[0], data: firstAdapterTokenInData },
+        ],
+      },
+    ];
+
+    const firstTokenInJson = await ethCallMany(firstTokenInBundle);
+    // eth_callMany returns result as array of arrays: [[{value: "0x..."}]]
+    const firstTokenInBundleResult = firstTokenInJson?.result?.[0];
+    const firstTokenInResult = Array.isArray(firstTokenInBundleResult) ? firstTokenInBundleResult[0] : firstTokenInBundleResult;
+    const firstTokenInOutput = extractEthCallManyOutput(firstTokenInResult);
+
+    if (!firstTokenInOutput) {
+      res.status(502).json({ error: 'Failed to get TOKEN_IN from first adapter', raw: firstTokenInJson?.result });
+      return;
+    }
+
+    // Decode TOKEN_IN address
+    const firstTokenIn = decodeAddress(firstTokenInOutput, adapterAbi, 'TOKEN_IN');
+    if (!firstTokenIn) {
+      res.status(502).json({ error: 'Failed to decode TOKEN_IN address', raw: firstTokenInOutput });
+      return;
+    }
+
+    // Check if firstTokenIn is in the mapping
+    const tokenInHolder = tokenInHolderMap[firstTokenIn];
+    if (!tokenInHolder) {
+      res.status(400).json({
+        error: `TOKEN_IN ${firstTokenIn} not found in tokenInHolderMap`,
+        tokenIn: firstTokenIn,
+      });
+      return;
+    }
+
+    // Step 2: Get TOKEN_IN and TOKEN_OUT for all adapters
+    const adapterTokensData: { tokenIn: Address; tokenOut: Address }[] = [];
+
+    const tokenQueries: EthCallManyTx[] = [];
+    for (const adapter of adapters) {
+      tokenQueries.push(
+        { from: ZERO_ADDRESS, to: adapter, data: encodeFunctionData({ abi: adapterAbi, functionName: 'TOKEN_IN', args: [] }) },
+        { from: ZERO_ADDRESS, to: adapter, data: encodeFunctionData({ abi: adapterAbi, functionName: 'TOKEN_OUT', args: [] }) },
+      );
+    }
+
+    const tokensBundle: EthCallManyBundle[] = [{ transactions: tokenQueries }];
+    const tokensJson = await ethCallMany(tokensBundle);
+    const tokensResults = Array.isArray(tokensJson?.result?.[0]) ? tokensJson.result[0] : [];
+
+    for (let i = 0; i < adapters.length; i++) {
+      const tokenInOutput = extractEthCallManyOutput(tokensResults[i * 2]);
+      const tokenOutOutput = extractEthCallManyOutput(tokensResults[i * 2 + 1]);
+
+      if (!tokenInOutput || !tokenOutOutput) {
+        res.status(502).json({ error: `Failed to get tokens for adapter ${i}`, raw: tokensResults });
+        return;
+      }
+
+      const tokenIn = decodeAddress(tokenInOutput, adapterAbi, 'TOKEN_IN');
+      const tokenOut = decodeAddress(tokenOutOutput, adapterAbi, 'TOKEN_OUT');
+
+      if (!tokenIn || !tokenOut) {
+        res.status(502).json({
+          error: `Failed to decode tokens for adapter ${i}`,
+          tokenInOutput,
+          tokenOutOutput,
+        });
+        return;
+      }
+
+      adapterTokensData.push({ tokenIn, tokenOut });
+    }
+
+    // Step 3: Execute adapters sequentially (each needs amountOut from previous)
+    // First, transfer tokens from rich address to empty EOA, then operate from empty EOA
+    const balanceChanges: Array<{ token: Address; change: string }> = [];
+    const buyResults: Array<{ finished: boolean; amountOut: string }> = [];
+    let currentAmountIn = amount;
+
+    for (let i = 0; i < adapters.length; i++) {
+      const adapter = adapters[i];
+      const { tokenIn, tokenOut } = adapterTokensData[i];
+
+      // For first adapter, get the rich address holder; for others, tokens are already on EMPTY_EOA
+      const richTokenHolder = i === 0
+        ? tokenInHolder
+        : (tokenInHolderMap[tokenIn] || tokenInHolder);
+
+      // Build transactions for this adapter
+      const adapterTransactions: EthCallManyTx[] = [];
+
+      // Balance before - check balance of tokenOut on EMPTY_EOA
+      const balanceBeforeTokenOutData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [EMPTY_EOA],
+      });
+      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenOut, data: balanceBeforeTokenOutData });
+
+      // Balance before - check balance of tokenIn on EMPTY_EOA
+      const balanceBeforeTokenInData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [EMPTY_EOA],
+      });
+      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenIn, data: balanceBeforeTokenInData });
+
+      // For first adapter: transfer tokens from rich address to EMPTY_EOA
+      // For intermediate adapters: tokens are already on EMPTY_EOA from previous buy
+      if (i === 0) {
+        const transferData = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'transfer',
+          args: [EMPTY_EOA, currentAmountIn],
+        });
+        adapterTransactions.push({ from: richTokenHolder, to: tokenIn, data: transferData });
+      }
+
+      // Approve tokenIn to adapter (from EMPTY_EOA)
+      const approveData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [adapter, MAX_UINT256],
+      });
+      adapterTransactions.push({ from: EMPTY_EOA, to: tokenIn, data: approveData });
+
+      // Buy with currentAmountIn (from EMPTY_EOA)
+      const buyData = encodeFunctionData({
+        abi: adapterAbi,
+        functionName: 'buy',
+        args: [currentAmountIn, positionId, minAmountOut, data],
+      });
+      adapterTransactions.push({ from: EMPTY_EOA, to: adapter, data: buyData });
+
+      // Balance after - check balance of tokenIn on EMPTY_EOA
+      const balanceAfterTokenInData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [EMPTY_EOA],
+      });
+      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenIn, data: balanceAfterTokenInData });
+
+      // Balance after - check balance of tokenOut on EMPTY_EOA
+      const balanceAfterTokenOutData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [EMPTY_EOA],
+      });
+      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenOut, data: balanceAfterTokenOutData });
+
+      // Execute this adapter's transactions
+      const adapterBundle: EthCallManyBundle[] = [{ transactions: adapterTransactions }];
+      const adapterJson = await ethCallMany(adapterBundle);
+      const adapterResults = Array.isArray(adapterJson?.result?.[0]) ? adapterJson.result[0] : [];
+
+      // Check for errors
+      for (let j = 0; j < adapterTransactions.length; j++) {
+        const result = adapterResults[j];
+        if (result && typeof result === 'object' && (result as any).error) {
+          const err = (result as any).error;
+          const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+          console.error(`[Contract Error] Adapter ${i}, transaction ${j} failed:`, {
+            error: err,
+            message: msg,
+            raw: result,
+            adapter,
+            tokenIn,
+            tokenOut,
+            amountIn: currentAmountIn.toString(),
+          });
+          res.status(502).json({
+            error: `Adapter ${i} transaction ${j} failed: ${msg}`,
+            raw: result,
+            adapterIndex: i,
+            transactionIndex: j,
+          });
+          return;
+        }
+      }
+
+      // Extract balances
+      // Structure:
+      // For first adapter: balanceBefore tokenOut (0), balanceBefore tokenIn (1), transfer (2), approve (3), buy (4), balanceAfter tokenIn (5), balanceAfter tokenOut (6)
+      // For intermediate: balanceBefore tokenOut (0), balanceBefore tokenIn (1), approve (2), buy (3), balanceAfter tokenIn (4), balanceAfter tokenOut (5)
+
+      // Balance before tokenOut (index 0)
+      const beforeTokenOutOutput = extractEthCallManyOutput(adapterResults[0]);
+      const beforeTokenOutBalance = beforeTokenOutOutput
+        ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: beforeTokenOutOutput }) as unknown as bigint)
+        : 0n;
+
+      // Balance before tokenIn (index 1)
+      const beforeTokenInOutput = extractEthCallManyOutput(adapterResults[1]);
+      const beforeTokenInBalance = beforeTokenInOutput
+        ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: beforeTokenInOutput }) as unknown as bigint)
+        : 0n;
+
+      // Extract buy result
+      const buyIndex = i === 0 ? 4 : 3;
+      const buyOutput = extractEthCallManyOutput(adapterResults[buyIndex]);
+      let amountOut = 0n;
+      let finished = false;
+      if (buyOutput) {
+        try {
+          const decoded = decodeFunctionResult({
+            abi: adapterAbi,
+            functionName: 'buy',
+            data: buyOutput,
+          }) as unknown as readonly [bigint, boolean];
+          amountOut = decoded[0];
+          finished = decoded[1];
+        } catch (err) {
+          console.error(`[Error] Failed to decode buy result for adapter ${i}:`, err);
+        }
+      }
+
+      // Balance after tokenIn
+      const afterTokenInIndex = i === 0 ? 5 : 4;
+      const afterTokenInOutput = extractEthCallManyOutput(adapterResults[afterTokenInIndex]);
+      const afterTokenInBalance = afterTokenInOutput
+        ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: afterTokenInOutput }) as unknown as bigint)
+        : 0n;
+
+      // Balance after tokenOut
+      const afterTokenOutIndex = i === 0 ? 6 : 5;
+      const afterTokenOutOutput = extractEthCallManyOutput(adapterResults[afterTokenOutIndex]);
+      const afterTokenOutBalance = afterTokenOutOutput
+        ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: afterTokenOutOutput }) as unknown as bigint)
+        : 0n;
+
+      // Calculate balance changes
+      const tokenInChange = afterTokenInBalance - beforeTokenInBalance;
+      const tokenOutChange = afterTokenOutBalance - beforeTokenOutBalance;
+
+      // Log balance changes for debugging
+      if (ptConfig.debug) {
+        console.log(`[simulateTokenSale] Adapter ${i}:`, {
+          tokenIn,
+          tokenOut,
+          beforeTokenInBalance: beforeTokenInBalance.toString(),
+          afterTokenInBalance: afterTokenInBalance.toString(),
+          tokenInChange: tokenInChange.toString(),
+          beforeTokenOutBalance: beforeTokenOutBalance.toString(),
+          afterTokenOutBalance: afterTokenOutBalance.toString(),
+          tokenOutChange: tokenOutChange.toString(),
+          amountIn: currentAmountIn.toString(),
+          amountOut: amountOut.toString(),
+        });
+      }
+
+      // Add balance change for tokenOut (this is what we're tracking)
+      balanceChanges.push({
+        token: tokenOut,
+        change: tokenOutChange.toString(),
+      });
+
+      buyResults.push({
+        finished,
+        amountOut: amountOut.toString(),
+      });
+
+      // Update currentAmountIn for next adapter
+      currentAmountIn = amountOut;
+    }
+
+    res.status(200).json({
+      balanceChanges,
+      buyResults,
+    });
   } catch (err) {
     next(err);
   }
