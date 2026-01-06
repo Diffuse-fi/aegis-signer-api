@@ -725,6 +725,250 @@
           }
         }
       }
+    },
+    "/simulateTokenSale": {
+      "get": {
+        "summary": "Simulate token sale through adapter chain",
+        "description": "Simulates selling a token through a chain of adapters. Executes sequential buy calls and returns balance changes for intermediate and final tokens. Supports both GET (query params) and POST (body) methods.",
+        "parameters": [
+          {
+            "name": "adapters",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "JSON array of adapter addresses, e.g. '[\"0x98271E06b882eb0a35Ca4739c2F80acFA7e2Aa91\"]'"
+          },
+          {
+            "name": "amount",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount of tokens to sell (in wei/smallest unit, string)"
+          },
+          {
+            "name": "position_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "0"
+            },
+            "description": "Position ID for adapters (default: 0)"
+          },
+          {
+            "name": "min_amount_out",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "0"
+            },
+            "description": "Minimum amount of output tokens (default: 0)"
+          },
+          {
+            "name": "data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "0x"
+            },
+            "description": "Additional data (hex string, default: 0x)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "balanceChanges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "token": {
+                            "type": "string",
+                            "description": "Token address"
+                          },
+                          "change": {
+                            "type": "string",
+                            "description": "Balance change (in wei)"
+                          }
+                        }
+                      },
+                      "description": "Array of balance changes for each adapter's tokenOut"
+                    },
+                    "buyResults": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "finished": {
+                            "type": "boolean",
+                            "description": "Whether the buy operation finished successfully"
+                          },
+                          "amountOut": {
+                            "type": "string",
+                            "description": "Amount of tokens received (in wei)"
+                          }
+                        }
+                      },
+                      "description": "Results of buy calls for each adapter"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or TOKEN_IN not found in token-holders.json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "tokenIn": {
+                      "type": "string",
+                      "description": "TOKEN_IN address that needs to be added to token-holders.json"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Contract simulation error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Simulate token sale through adapter chain",
+        "description": "Simulates selling a token through a chain of adapters. Executes sequential buy calls and returns balance changes for intermediate and final tokens. Supports both GET (query params) and POST (body) methods.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["adapters", "amount"],
+                "properties": {
+                  "adapters": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Array of adapter addresses in execution order",
+                    "example": ["0x98271E06b882eb0a35Ca4739c2F80acFA7e2Aa91"]
+                  },
+                  "amount": {
+                    "type": "string",
+                    "description": "Amount of tokens to sell (in wei/smallest unit, string)",
+                    "example": "10000000000000000000000"
+                  },
+                  "position_id": {
+                    "type": "string",
+                    "description": "Position ID for adapters (default: 0). Also accepts camelCase: positionId",
+                    "example": "0",
+                    "default": "0"
+                  },
+                  "min_amount_out": {
+                    "type": "string",
+                    "description": "Minimum amount of output tokens (default: 0). Also accepts camelCase: minAmountOut",
+                    "example": "0",
+                    "default": "0"
+                  },
+                  "data": {
+                    "type": "string",
+                    "description": "Additional data (hex string, default: 0x)",
+                    "example": "0x",
+                    "default": "0x"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "balanceChanges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "token": {
+                            "type": "string",
+                            "description": "Token address"
+                          },
+                          "change": {
+                            "type": "string",
+                            "description": "Balance change (in wei)"
+                          }
+                        }
+                      },
+                      "description": "Array of balance changes for each adapter's tokenOut"
+                    },
+                    "buyResults": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "finished": {
+                            "type": "boolean",
+                            "description": "Whether the buy operation finished successfully"
+                          },
+                          "amountOut": {
+                            "type": "string",
+                            "description": "Amount of tokens received (in wei)"
+                          }
+                        }
+                      },
+                      "description": "Results of buy calls for each adapter"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or TOKEN_IN not found in token-holders.json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "tokenIn": {
+                      "type": "string",
+                      "description": "TOKEN_IN address that needs to be added to token-holders.json"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Contract simulation error"
+          }
+        }
+      }
     }
   }
 }
