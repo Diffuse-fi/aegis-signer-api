@@ -98,6 +98,8 @@ async function main() {
     console.error('previewBorrow failed:', error);
     process.exit(1);
   }
+
+  console.log('\n✅ All tests completed!');
 }
 
 main();

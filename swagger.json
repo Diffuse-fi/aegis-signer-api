@@ -467,6 +467,17 @@
           "required": true,
           "content": {
             "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "target_pt_amount": "10000000000000000000",
+                    "vault_address": "0x11D79cb50f7ac27A208C5D435440221729837485",
+                    "strategy_id": "0",
+                    "precision_bps": "50",
+                    "data": "0x"
+                  }
+                }
+              },
               "schema": {
                 "type": "object",
                 "required": ["target_pt_amount", "vault_address", "strategy_id"],

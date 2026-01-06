@@ -11,6 +11,7 @@
     "test:sign": "tsx scripts/test-sign.ts",
     "test:redeem": "tsx scripts/test-redeem.ts",
     "test:pt": "tsx scripts/test-pt.ts",
+    "test:pendle": "tsx scripts/test-pendle.ts",
     "start": "node dist/index.js",
     "start:pt": "node dist/pt-api.js"
   },
