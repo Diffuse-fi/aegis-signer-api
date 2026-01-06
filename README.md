@@ -104,6 +104,29 @@ Returns server health status and the configured signer address.
 }
 ```
 
+### `POST /simulateTokenSale` (PT API)
+
+Simulates selling a token through a chain of adapters.
+
+**Request:**
+```json
+{
+  "adapters": ["0x98271E06b882eb0a35Ca4739c2F80acFA7e2Aa91"],
+  "amount": "10000000000000000000000"
+}
+```
+
+**Response:**
+```json
+{
+  "balanceChanges": [{ "token": "0x...", "change": "1234567890" }],
+  "buyResults": [{ "finished": true, "amountOut": "1234567890" }]
+}
+```
+
+**Parameters:** `adapters` (array), `amount` (string in wei), `data` (optional).  
+**Important:** TOKEN_IN of the first adapter must be in `token-holders.json`.
+
 ## Security
 
 - **CORS**: Configurable via `CORS_ORIGIN` env var (comma-separated list of allowed origins).

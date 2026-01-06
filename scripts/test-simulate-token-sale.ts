@@ -21,8 +21,6 @@ async function main() {
     const payload = {
       adapters: [ADAPTER],
       amount: AMOUNT,
-      position_id: '0',
-      min_amount_out: '0',
       data: '0x',
     };
 

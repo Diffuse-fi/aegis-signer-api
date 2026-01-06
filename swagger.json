@@ -750,26 +750,6 @@
             "description": "Amount of tokens to sell (in wei/smallest unit, string)"
           },
           {
-            "name": "position_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "0"
-            },
-            "description": "Position ID for adapters (default: 0)"
-          },
-          {
-            "name": "min_amount_out",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "0"
-            },
-            "description": "Minimum amount of output tokens (default: 0)"
-          },
-          {
             "name": "data",
             "in": "query",
             "required": false,
@@ -874,18 +854,6 @@
                     "type": "string",
                     "description": "Amount of tokens to sell (in wei/smallest unit, string)",
                     "example": "10000000000000000000000"
-                  },
-                  "position_id": {
-                    "type": "string",
-                    "description": "Position ID for adapters (default: 0). Also accepts camelCase: positionId",
-                    "example": "0",
-                    "default": "0"
-                  },
-                  "min_amount_out": {
-                    "type": "string",
-                    "description": "Minimum amount of output tokens (default: 0). Also accepts camelCase: minAmountOut",
-                    "example": "0",
-                    "default": "0"
                   },
                   "data": {
                     "type": "string",

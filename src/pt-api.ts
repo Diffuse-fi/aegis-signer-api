@@ -737,7 +737,7 @@ app.all('/previewBorrow', async (req: Request, res: Response, next: NextFunction
 });
 
 // POST /simulateTokenSale
-// Body: { adapters: ["0x...", "0x..."], amount: "123", position_id: "0" (optional), min_amount_out: "0" (optional), data: "0x" (optional) }
+// Body: { adapters: ["0x...", "0x..."], amount: "123", data: "0x" (optional) }
 // Also supports camelCase keys and query params for convenience.
 app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -750,20 +750,6 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
     const amountRaw =
       pickString((req.body as any)?.amount) ??
       pickString((req.query as any)?.amount);
-
-    const positionIdRaw =
-      pickString((req.body as any)?.position_id) ??
-      pickString((req.body as any)?.positionId) ??
-      pickString((req.query as any)?.position_id) ??
-      pickString((req.query as any)?.positionId) ??
-      '0';
-
-    const minAmountOutRaw =
-      pickString((req.body as any)?.min_amount_out) ??
-      pickString((req.body as any)?.minAmountOut) ??
-      pickString((req.query as any)?.min_amount_out) ??
-      pickString((req.query as any)?.minAmountOut) ??
-      '0';
 
     const dataRaw =
       pickString((req.body as any)?.data) ??
@@ -817,8 +803,8 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
     }
 
     const amount = parseBigIntParam(amountRaw, 'amount');
-    const positionId = parseBigIntParam(positionIdRaw, 'position_id');
-    const minAmountOut = parseBigIntParam(minAmountOutRaw, 'min_amount_out');
+    const positionId = 0n; // Always 0
+    const minAmountOut = 0n; // Always 0
 
     let data: Hex = '0x' as Hex;
     if (dataRaw && dataRaw.startsWith('0x')) {
