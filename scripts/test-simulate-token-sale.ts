@@ -3,23 +3,26 @@ export { };
 const PT_API_PORT = process.env.PT_API_PORT || '3100';
 const API_URL = process.env.PT_API_URL || `http://127.0.0.1:${PT_API_PORT}`;
 
-// CAP-USDC adapter
-const ADAPTER = '0x98271E06b882eb0a35Ca4739c2F80acFA7e2Aa91';
+// Chain of adapters
+const ADAPTERS = [
+  '0x2CE0e20E428Ee32DE654aBaFcFC340d6709Ab9f0',
+  '0x98271E06b882eb0a35Ca4739c2F80acFA7e2Aa91'
+];
 
-// 10000 CAP (18 decimals)
-const AMOUNT = '10000000000000000000000';
+// 10 tokens (18 decimals)
+const AMOUNT = '10000000000000000000';
 
 async function main() {
   console.log('🧪 Starting simulateTokenSale test...');
   console.log(`API_URL: ${API_URL}`);
-  console.log(`Adapter: ${ADAPTER}`);
-  console.log(`Amount: ${AMOUNT} (10000 CAP with 18 decimals)`);
+  console.log(`Adapters: ${ADAPTERS.join(', ')}`);
+  console.log(`Amount: ${AMOUNT} (10 tokens with 18 decimals)`);
 
   try {
     console.log('\n📡 Testing /simulateTokenSale...');
 
     const payload = {
-      adapters: [ADAPTER],
+      adapters: ADAPTERS,
       amount: AMOUNT,
       data: '0x',
     };

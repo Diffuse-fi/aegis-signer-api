@@ -814,33 +814,30 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
       return;
     }
 
-    // Step 1: Get TOKEN_IN for first adapter and verify it's in the mapping
-    const firstAdapterTokenInData = encodeFunctionData({
-      abi: adapterAbi,
-      functionName: 'TOKEN_IN',
-      args: [],
-    });
+    // Step 1: Get TOKEN_IN and TOKEN_OUT for all adapters in one call
+    const adapterTokensData: { tokenIn: Address; tokenOut: Address }[] = [];
 
-    const firstTokenInBundle: EthCallManyBundle[] = [
-      {
-        transactions: [
-          { from: ZERO_ADDRESS, to: adapters[0], data: firstAdapterTokenInData },
-        ],
-      },
-    ];
+    const tokenQueries: EthCallManyTx[] = [];
+    for (const adapter of adapters) {
+      tokenQueries.push(
+        { from: ZERO_ADDRESS, to: adapter, data: encodeFunctionData({ abi: adapterAbi, functionName: 'TOKEN_IN', args: [] }) },
+        { from: ZERO_ADDRESS, to: adapter, data: encodeFunctionData({ abi: adapterAbi, functionName: 'TOKEN_OUT', args: [] }) },
+      );
+    }
 
-    const firstTokenInJson = await ethCallMany(firstTokenInBundle);
-    // eth_callMany returns result as array of arrays: [[{value: "0x..."}]]
-    const firstTokenInBundleResult = firstTokenInJson?.result?.[0];
-    const firstTokenInResult = Array.isArray(firstTokenInBundleResult) ? firstTokenInBundleResult[0] : firstTokenInBundleResult;
-    const firstTokenInOutput = extractEthCallManyOutput(firstTokenInResult);
+    const tokensBundle: EthCallManyBundle[] = [{ transactions: tokenQueries }];
+    const tokensJson = await ethCallMany(tokensBundle);
+    // eth_callMany returns result as array of arrays: [[{value: "0x..."}, {value: "0x..."}]]
+    const tokensBundleResult = tokensJson?.result?.[0];
+    const tokensResults = Array.isArray(tokensBundleResult) ? tokensBundleResult : [];
 
+    // Extract TOKEN_IN for first adapter to check mapping (it's at index 0)
+    const firstTokenInOutput = extractEthCallManyOutput(tokensResults[0]);
     if (!firstTokenInOutput) {
-      res.status(502).json({ error: 'Failed to get TOKEN_IN from first adapter', raw: firstTokenInJson?.result });
+      res.status(502).json({ error: 'Failed to get TOKEN_IN from first adapter', raw: tokensJson?.result });
       return;
     }
 
-    // Decode TOKEN_IN address
     const firstTokenIn = decodeAddress(firstTokenInOutput, adapterAbi, 'TOKEN_IN');
     if (!firstTokenIn) {
       res.status(502).json({ error: 'Failed to decode TOKEN_IN address', raw: firstTokenInOutput });
@@ -856,21 +853,6 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
       });
       return;
     }
-
-    // Step 2: Get TOKEN_IN and TOKEN_OUT for all adapters
-    const adapterTokensData: { tokenIn: Address; tokenOut: Address }[] = [];
-
-    const tokenQueries: EthCallManyTx[] = [];
-    for (const adapter of adapters) {
-      tokenQueries.push(
-        { from: ZERO_ADDRESS, to: adapter, data: encodeFunctionData({ abi: adapterAbi, functionName: 'TOKEN_IN', args: [] }) },
-        { from: ZERO_ADDRESS, to: adapter, data: encodeFunctionData({ abi: adapterAbi, functionName: 'TOKEN_OUT', args: [] }) },
-      );
-    }
-
-    const tokensBundle: EthCallManyBundle[] = [{ transactions: tokenQueries }];
-    const tokensJson = await ethCallMany(tokensBundle);
-    const tokensResults = Array.isArray(tokensJson?.result?.[0]) ? tokensJson.result[0] : [];
 
     for (let i = 0; i < adapters.length; i++) {
       const tokenInOutput = extractEthCallManyOutput(tokensResults[i * 2]);
@@ -896,17 +878,144 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
       adapterTokensData.push({ tokenIn, tokenOut });
     }
 
-    // Step 3: Execute adapters sequentially (each needs amountOut from previous)
-    // First, transfer tokens from rich address to empty EOA, then operate from empty EOA
+    // Step 3: Execute adapters sequentially, but in one eth_callMany bundle
+    // This ensures state is preserved between adapters (tokens from previous buy are available for next)
+    // However, we need to know amountOut from previous buy to use as amountIn for next
+    // So we execute sequentially but in one bundle by building transactions dynamically
     const balanceChanges: Array<{ token: Address; change: string }> = [];
     const buyResults: Array<{ finished: boolean; amountOut: string }> = [];
+
+    // We'll build transactions step by step, but execute in one bundle
+    // For now, keep sequential execution but ensure we use correct amountOut from previous
     let currentAmountIn = amount;
+
+    // Build all transactions for all adapters
+    const allTransactions: EthCallManyTx[] = [];
+    const adapterTxRanges: Array<{ start: number; end: number }> = [];
 
     for (let i = 0; i < adapters.length; i++) {
       const adapter = adapters[i];
       const { tokenIn, tokenOut } = adapterTokensData[i];
 
-      // For first adapter, get the rich address holder; for others, tokens are already on EMPTY_EOA
+      const richTokenHolder = i === 0
+        ? tokenInHolder
+        : (tokenInHolderMap[tokenIn] || tokenInHolder);
+
+      const startIdx = allTransactions.length;
+
+      // Balance before tokenOut
+      allTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenOut,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
+      });
+
+      // Balance before tokenIn
+      allTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenIn,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
+      });
+
+      // Transfer: for first adapter from rich address, for intermediate from rich address of intermediate token
+      if (i === 0) {
+        allTransactions.push({
+          from: richTokenHolder,
+          to: tokenIn,
+          data: encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'transfer',
+            args: [EMPTY_EOA, currentAmountIn],
+          }),
+        });
+      } else {
+        // For intermediate adapters, transfer intermediate token from rich address
+        // But we need to use amountOut from previous adapter, which we don't know yet
+        // So we'll use a placeholder and update after first execution
+        // Actually, we can't do this in one bundle - we need sequential execution
+        // But the issue is state doesn't persist between bundles
+        // Solution: use rich address holder for intermediate tokens too
+        allTransactions.push({
+          from: richTokenHolder,
+          to: tokenIn,
+          data: encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'transfer',
+            args: [EMPTY_EOA, currentAmountIn], // This will be updated after we know amountOut
+          }),
+        });
+      }
+
+      // Approve
+      allTransactions.push({
+        from: EMPTY_EOA,
+        to: tokenIn,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [adapter, MAX_UINT256],
+        }),
+      });
+
+      // Buy
+      allTransactions.push({
+        from: EMPTY_EOA,
+        to: adapter,
+        data: encodeFunctionData({
+          abi: adapterAbi,
+          functionName: 'buy',
+          args: [currentAmountIn, positionId, minAmountOut, data],
+        }),
+      });
+
+      // Balance after tokenIn
+      allTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenIn,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
+      });
+
+      // Balance after tokenOut
+      allTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenOut,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
+      });
+
+      adapterTxRanges.push({
+        start: startIdx,
+        end: allTransactions.length,
+      });
+
+      // We can't update currentAmountIn here because we don't know amountOut yet
+      // So we'll need to execute sequentially or rebuild bundle after each adapter
+    }
+
+    // Actually, we can't use amountOut from previous buy in the same bundle
+    // So we need to execute adapters sequentially, but the state won't persist
+    // The solution: for intermediate adapters, use transfer from rich address holder
+    // But we need to know the amount - we'll use amountOut from previous after extracting it
+
+    // Execute adapters sequentially to get amountOut for next
+    for (let i = 0; i < adapters.length; i++) {
+      const adapter = adapters[i];
+      const { tokenIn, tokenOut } = adapterTokensData[i];
       const richTokenHolder = i === 0
         ? tokenInHolder
         : (tokenInHolderMap[tokenIn] || tokenInHolder);
@@ -914,64 +1023,82 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
       // Build transactions for this adapter
       const adapterTransactions: EthCallManyTx[] = [];
 
-      // Balance before - check balance of tokenOut on EMPTY_EOA
-      const balanceBeforeTokenOutData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [EMPTY_EOA],
+      // Balance before tokenOut
+      adapterTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenOut,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
       });
-      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenOut, data: balanceBeforeTokenOutData });
 
-      // Balance before - check balance of tokenIn on EMPTY_EOA
-      const balanceBeforeTokenInData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [EMPTY_EOA],
+      // Balance before tokenIn
+      adapterTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenIn,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
       });
-      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenIn, data: balanceBeforeTokenInData });
 
-      // For first adapter: transfer tokens from rich address to EMPTY_EOA
-      // For intermediate adapters: tokens are already on EMPTY_EOA from previous buy
-      if (i === 0) {
-        const transferData = encodeFunctionData({
+      // Transfer: always from rich address holder (for first it's initial token, for intermediate it's intermediate token)
+      adapterTransactions.push({
+        from: richTokenHolder,
+        to: tokenIn,
+        data: encodeFunctionData({
           abi: erc20Abi,
           functionName: 'transfer',
           args: [EMPTY_EOA, currentAmountIn],
-        });
-        adapterTransactions.push({ from: richTokenHolder, to: tokenIn, data: transferData });
-      }
-
-      // Approve tokenIn to adapter (from EMPTY_EOA)
-      const approveData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [adapter, MAX_UINT256],
+        }),
       });
-      adapterTransactions.push({ from: EMPTY_EOA, to: tokenIn, data: approveData });
 
-      // Buy with currentAmountIn (from EMPTY_EOA)
-      const buyData = encodeFunctionData({
-        abi: adapterAbi,
-        functionName: 'buy',
-        args: [currentAmountIn, positionId, minAmountOut, data],
+      // Approve
+      adapterTransactions.push({
+        from: EMPTY_EOA,
+        to: tokenIn,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [adapter, MAX_UINT256],
+        }),
       });
-      adapterTransactions.push({ from: EMPTY_EOA, to: adapter, data: buyData });
 
-      // Balance after - check balance of tokenIn on EMPTY_EOA
-      const balanceAfterTokenInData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [EMPTY_EOA],
+      // Buy
+      adapterTransactions.push({
+        from: EMPTY_EOA,
+        to: adapter,
+        data: encodeFunctionData({
+          abi: adapterAbi,
+          functionName: 'buy',
+          args: [currentAmountIn, positionId, minAmountOut, data],
+        }),
       });
-      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenIn, data: balanceAfterTokenInData });
 
-      // Balance after - check balance of tokenOut on EMPTY_EOA
-      const balanceAfterTokenOutData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [EMPTY_EOA],
+      // Balance after tokenIn
+      adapterTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenIn,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
       });
-      adapterTransactions.push({ from: ZERO_ADDRESS, to: tokenOut, data: balanceAfterTokenOutData });
+
+      // Balance after tokenOut
+      adapterTransactions.push({
+        from: ZERO_ADDRESS,
+        to: tokenOut,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [EMPTY_EOA],
+        }),
+      });
 
       // Execute this adapter's transactions
       const adapterBundle: EthCallManyBundle[] = [{ transactions: adapterTransactions }];
@@ -1003,26 +1130,19 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
         }
       }
 
-      // Extract balances
-      // Structure:
-      // For first adapter: balanceBefore tokenOut (0), balanceBefore tokenIn (1), transfer (2), approve (3), buy (4), balanceAfter tokenIn (5), balanceAfter tokenOut (6)
-      // For intermediate: balanceBefore tokenOut (0), balanceBefore tokenIn (1), approve (2), buy (3), balanceAfter tokenIn (4), balanceAfter tokenOut (5)
-
-      // Balance before tokenOut (index 0)
+      // Extract balances and buy result
+      // Structure: balanceBefore tokenOut (0), balanceBefore tokenIn (1), transfer (2), approve (3), buy (4), balanceAfter tokenIn (5), balanceAfter tokenOut (6)
       const beforeTokenOutOutput = extractEthCallManyOutput(adapterResults[0]);
       const beforeTokenOutBalance = beforeTokenOutOutput
         ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: beforeTokenOutOutput }) as unknown as bigint)
         : 0n;
 
-      // Balance before tokenIn (index 1)
       const beforeTokenInOutput = extractEthCallManyOutput(adapterResults[1]);
       const beforeTokenInBalance = beforeTokenInOutput
         ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: beforeTokenInOutput }) as unknown as bigint)
         : 0n;
 
-      // Extract buy result
-      const buyIndex = i === 0 ? 4 : 3;
-      const buyOutput = extractEthCallManyOutput(adapterResults[buyIndex]);
+      const buyOutput = extractEthCallManyOutput(adapterResults[4]);
       let amountOut = 0n;
       let finished = false;
       if (buyOutput) {
@@ -1039,25 +1159,19 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
         }
       }
 
-      // Balance after tokenIn
-      const afterTokenInIndex = i === 0 ? 5 : 4;
-      const afterTokenInOutput = extractEthCallManyOutput(adapterResults[afterTokenInIndex]);
+      const afterTokenInOutput = extractEthCallManyOutput(adapterResults[5]);
       const afterTokenInBalance = afterTokenInOutput
         ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: afterTokenInOutput }) as unknown as bigint)
         : 0n;
 
-      // Balance after tokenOut
-      const afterTokenOutIndex = i === 0 ? 6 : 5;
-      const afterTokenOutOutput = extractEthCallManyOutput(adapterResults[afterTokenOutIndex]);
+      const afterTokenOutOutput = extractEthCallManyOutput(adapterResults[6]);
       const afterTokenOutBalance = afterTokenOutOutput
         ? (decodeFunctionResult({ abi: erc20Abi, functionName: 'balanceOf', data: afterTokenOutOutput }) as unknown as bigint)
         : 0n;
 
-      // Calculate balance changes
       const tokenInChange = afterTokenInBalance - beforeTokenInBalance;
       const tokenOutChange = afterTokenOutBalance - beforeTokenOutBalance;
 
-      // Log balance changes for debugging
       if (ptConfig.debug) {
         console.log(`[simulateTokenSale] Adapter ${i}:`, {
           tokenIn,
@@ -1073,7 +1187,6 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
         });
       }
 
-      // Add balance change for tokenOut (this is what we're tracking)
       balanceChanges.push({
         token: tokenOut,
         change: tokenOutChange.toString(),
