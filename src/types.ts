@@ -1,6 +1,6 @@
 export interface SignRequest {
   collateral_amount: string;
-  slippage: number;
+  slippage: number; // Accepts number, but also accepts string with comma/dot (e.g., "1,5" or "1.5") which gets parsed
   collateral_asset: string;
   /**
    * Optional mint adapter override (beneficiary_address sent to Aegis).
@@ -11,7 +11,7 @@ export interface SignRequest {
 
 export interface RedeemRequest {
   yusd_amount: string;
-  slippage: number;
+  slippage: number; // Accepts number, but also accepts string with comma/dot (e.g., "1,5" or "1.5") which gets parsed
   collateral_asset: string;
   adapter_address?: string;
   instance_address?: string;

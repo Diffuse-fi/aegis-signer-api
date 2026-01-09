@@ -55,6 +55,36 @@ const publicClient = createPublicClient({
   transport: http(config.ethRpcUrl)
 });
 
+/**
+ * Parses slippage value from string or number.
+ * Supports both comma and dot as decimal separators.
+ * @param value - Slippage value as string or number
+ * @returns Parsed number
+ * @throws Error if value cannot be parsed
+ */
+function parseSlippage(value: unknown): number {
+  if (typeof value === 'number') {
+    if (isNaN(value) || !isFinite(value)) {
+      throw new Error('Invalid slippage (must be a finite number)');
+    }
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    // Replace comma with dot for parsing (supports both "1.5" and "1,5")
+    const normalized = value.trim().replace(/,/g, '.');
+    const parsed = parseFloat(normalized);
+
+    if (isNaN(parsed) || !isFinite(parsed)) {
+      throw new Error('Invalid slippage (must be a valid number)');
+    }
+
+    return parsed;
+  }
+
+  throw new Error('Invalid slippage (must be a number or numeric string)');
+}
+
 // Mint endpoint
 app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -66,8 +96,16 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
       return;
     }
 
-    if (slippage === undefined || typeof slippage !== 'number') {
-      res.status(400).json({ error: 'Invalid or missing slippage (must be a number)' });
+    if (slippage === undefined) {
+      res.status(400).json({ error: 'Missing slippage' });
+      return;
+    }
+
+    let parsedSlippage: number;
+    try {
+      parsedSlippage = parseSlippage(slippage);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid slippage' });
       return;
     }
 
@@ -110,14 +148,14 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
       collateral_asset: collateral_asset,
       collateral_amount,
       signature,
-      slippage,
+      slippage: parsedSlippage,
       token_address: config.aegis.tokenAddress
     };
 
     if (config.debug) {
       console.log('Sending payload to Aegis:', payload);
     } else {
-      console.log(`[Mint] asset=${collateral_asset} amount=${collateral_amount} slippage=${slippage} adapter=${finalAdapterAddress}`);
+      console.log(`[Mint] asset=${collateral_asset} amount=${collateral_amount} slippage=${parsedSlippage} adapter=${finalAdapterAddress}`);
     }
 
     const aegisResponse = await fetch(config.aegis.apiUrl, {
@@ -189,8 +227,16 @@ app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Pro
       return;
     }
 
-    if (slippage === undefined || typeof slippage !== 'number') {
-      res.status(400).json({ error: 'Invalid or missing slippage (must be a number)' });
+    if (slippage === undefined) {
+      res.status(400).json({ error: 'Missing slippage' });
+      return;
+    }
+
+    let parsedSlippage: number;
+    try {
+      parsedSlippage = parseSlippage(slippage);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid slippage' });
       return;
     }
 
@@ -273,13 +319,13 @@ app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Pro
       collateral_asset: collateral_asset,
       yusd_amount,
       signature,
-      slippage
+      slippage: parsedSlippage
     };
 
     if (config.debug) {
       console.log('Sending payload to Aegis (Redeem):', payload);
     } else {
-      console.log(`[Redeem] asset=${collateral_asset} amount=${yusd_amount} slippage=${slippage}`);
+      console.log(`[Redeem] asset=${collateral_asset} amount=${yusd_amount} slippage=${parsedSlippage}`);
     }
 
     const aegisResponse = await fetch(config.aegis.redeemUrl, {
