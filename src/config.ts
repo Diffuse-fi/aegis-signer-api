@@ -19,12 +19,21 @@ const getPrivateKey = (): Hex => {
   return key as Hex;
 };
 
+const getCorsOrigin = (raw: string): string | string[] => {
+  const origins = raw
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  if (origins.length === 0) return '*';
+  if (origins.includes('*')) return '*';
+  return origins;
+};
+
 export const config = {
   port: parseInt(getEnvVar('PORT', false), 10) || 3000,
   privateKey: getPrivateKey(),
-  corsOrigin: getEnvVar('CORS_ORIGIN', false).split(',').map(o => o.trim()).filter(Boolean).length > 0
-    ? getEnvVar('CORS_ORIGIN', false).split(',').map(o => o.trim())
-    : '*',
+  corsOrigin: getCorsOrigin(getEnvVar('CORS_ORIGIN', false)),
   debug: getEnvVar('DEBUG', false) === 'true',
   aegis: {
     beneficiary: getEnvVar('AEGIS_BENEFICIARY'),

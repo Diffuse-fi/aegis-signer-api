@@ -17,7 +17,11 @@ const swaggerDocument = JSON.parse(fs.readFileSync(new URL('../swagger.json', im
 const app = express();
 
 // Security: Helmet for security headers
-app.use(helmet());
+// Configure helmet to allow CORS headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false,
+}));
 
 // Trust proxy (needed for rate limit behind Nginx)
 app.set('trust proxy', 1);
