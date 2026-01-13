@@ -937,6 +937,173 @@
           }
         }
       }
+    },
+    "/convert": {
+      "get": {
+        "summary": "Get limit order data for USDC to PT conversion",
+        "description": "Fetches limit order routing data from Pendle API for converting USDC to PT tokens. Returns both raw limit order data and ABI-encoded data for on-chain use. Supports both GET (query params) and POST (body) methods.",
+        "parameters": [
+          {
+            "name": "base_token_amount",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount of USDC to convert (e.g., '1000000000' for 1000 USDC with 6 decimals)"
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pendle market address"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "limitOrderData": {
+                      "type": "object",
+                      "description": "Raw limit order data from Pendle API containing order book entries",
+                      "properties": {
+                        "yt": {
+                          "type": "string",
+                          "description": "YT token address"
+                        },
+                        "pt": {
+                          "type": "string",
+                          "description": "PT token address"
+                        },
+                        "sy": {
+                          "type": "string",
+                          "description": "SY token address"
+                        },
+                        "netInputFromLimit": {
+                          "type": "string",
+                          "description": "Net input amount routed through limit orders"
+                        },
+                        "netOutputToLimit": {
+                          "type": "string",
+                          "description": "Net output amount from limit orders"
+                        },
+                        "orderDetails": {
+                          "type": "array",
+                          "description": "Array of limit order details",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    },
+                    "encoded": {
+                      "type": "string",
+                      "description": "ABI-encoded limit order data for on-chain smart contract calls"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Pendle API error or no limit order data available"
+          }
+        }
+      },
+      "post": {
+        "summary": "Get limit order data for USDC to PT conversion",
+        "description": "Fetches limit order routing data from Pendle API for converting USDC to PT tokens. Returns both raw limit order data and ABI-encoded data for on-chain use. Supports both GET (query params) and POST (body) methods.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["base_token_amount", "market"],
+                "properties": {
+                  "base_token_amount": {
+                    "type": "string",
+                    "description": "Amount of USDC to convert (e.g., '1000000000' for 1000 USDC with 6 decimals). Also accepts camelCase: baseTokenAmount",
+                    "example": "1000000000"
+                  },
+                  "market": {
+                    "type": "string",
+                    "description": "Pendle market address. Also accepts: strategy",
+                    "example": "0xB451A36c8B6b2EAc77AD0737BA732818143A0E25"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "limitOrderData": {
+                      "type": "object",
+                      "description": "Raw limit order data from Pendle API containing order book entries",
+                      "properties": {
+                        "yt": {
+                          "type": "string",
+                          "description": "YT token address"
+                        },
+                        "pt": {
+                          "type": "string",
+                          "description": "PT token address"
+                        },
+                        "sy": {
+                          "type": "string",
+                          "description": "SY token address"
+                        },
+                        "netInputFromLimit": {
+                          "type": "string",
+                          "description": "Net input amount routed through limit orders"
+                        },
+                        "netOutputToLimit": {
+                          "type": "string",
+                          "description": "Net output amount from limit orders"
+                        },
+                        "orderDetails": {
+                          "type": "array",
+                          "description": "Array of limit order details",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    },
+                    "encoded": {
+                      "type": "string",
+                      "description": "ABI-encoded limit order data for on-chain smart contract calls"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Pendle API error or no limit order data available"
+          }
+        }
+      }
     }
   }
 }
