@@ -6,13 +6,14 @@ import rateLimit from 'express-rate-limit';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { decodeFunctionResult, encodeFunctionData, isAddress, parseAbi, decodeErrorResult, type Address, type Hex } from 'viem';
+import { decodeFunctionResult, encodeFunctionData, encodeAbiParameters, isAddress, parseAbi, decodeErrorResult, type Address, type Hex } from 'viem';
 import { ptConfig } from './pt-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const USDC_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as const satisfies Address;
+const PENDLE_API_BASE = 'https://api-v2.pendle.finance';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const satisfies Address;
 // Empty EOA address used for token operations (tokens are transferred here from rich addresses)
 const EMPTY_EOA = '0x1111111111111111111111111111111111111111' as const satisfies Address;
@@ -82,6 +83,33 @@ type EthCallManyBundle = {
   blockOverride?: Record<string, unknown>;
 };
 
+type PendleFillOrderParams = {
+  order: {
+    salt: string;
+    expiry: string;
+    nonce: string;
+    orderType: string;
+    token: string;
+    YT: string;
+    maker: string;
+    receiver: string;
+    makingAmount: string;
+    lnImpliedRate: string;
+    failSafeRate: string;
+    permit: string;
+  };
+  signature: string;
+  makingAmount: string;
+};
+
+type PendleLimitOrderData = {
+  limitRouter: string;
+  epsSkipMarket: string;
+  normalFills: PendleFillOrderParams[];
+  flashFills: PendleFillOrderParams[];
+  optData: string;
+};
+
 const escapeForSingleQuotes = (value: string): string => value.replace(/'/g, `'\\''`);
 
 const toEthCallManyCurl = (rpcUrl: string, body: unknown): string => {
@@ -143,6 +171,21 @@ const decodeAddress = (output: Hex, abi: typeof adapterAbi, functionName: 'TOKEN
   return null;
 };
 
+async function getPtAddressFromMarket(marketAddress: Address): Promise<Address> {
+  const resp = await fetch(`${PENDLE_API_BASE}/core/v1/1/markets/${marketAddress}`);
+  if (!resp.ok) {
+    throw new Error(`Pendle API error (status ${resp.status})`);
+  }
+  const json = await resp.json() as { pt?: { address: string } };
+  if (!json.pt?.address) {
+    throw new Error('Unexpected Pendle API response format');
+  }
+  if (!isAddress(json.pt.address)) {
+    throw new Error(`Invalid PT address from Pendle API: ${json.pt.address}`);
+  }
+  return json.pt.address as Address;
+}
+
 async function ethCallMany(bundles: EthCallManyBundle[]) {
   const rpcBody = {
     jsonrpc: '2.0',
@@ -181,6 +224,70 @@ async function ethCallMany(bundles: EthCallManyBundle[]) {
 
   return json;
 }
+
+const fillOrderParamsComponents = [
+  {
+    name: 'order',
+    type: 'tuple',
+    components: [
+      { name: 'salt', type: 'uint256' },
+      { name: 'expiry', type: 'uint256' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'orderType', type: 'uint8' },
+      { name: 'token', type: 'address' },
+      { name: 'YT', type: 'address' },
+      { name: 'maker', type: 'address' },
+      { name: 'receiver', type: 'address' },
+      { name: 'makingAmount', type: 'uint256' },
+      { name: 'lnImpliedRate', type: 'uint256' },
+      { name: 'failSafeRate', type: 'uint256' },
+      { name: 'permit', type: 'bytes' },
+    ],
+  },
+  { name: 'signature', type: 'bytes' },
+  { name: 'makingAmount', type: 'uint256' },
+] as const;
+
+const limitOrderDataAbiType = {
+  type: 'tuple',
+  components: [
+    { name: 'limitRouter', type: 'address' },
+    { name: 'epsSkipMarket', type: 'uint256' },
+    { name: 'normalFills', type: 'tuple[]', components: fillOrderParamsComponents },
+    { name: 'flashFills', type: 'tuple[]', components: fillOrderParamsComponents },
+    { name: 'optData', type: 'bytes' },
+  ],
+} as const;
+
+const transformFillOrderParams = (fill: PendleFillOrderParams) => ({
+  order: {
+    salt: BigInt(fill.order.salt),
+    expiry: BigInt(fill.order.expiry),
+    nonce: BigInt(fill.order.nonce),
+    orderType: Number(fill.order.orderType),
+    token: fill.order.token as Address,
+    YT: fill.order.YT as Address,
+    maker: fill.order.maker as Address,
+    receiver: fill.order.receiver as Address,
+    makingAmount: BigInt(fill.order.makingAmount),
+    lnImpliedRate: BigInt(fill.order.lnImpliedRate),
+    failSafeRate: BigInt(fill.order.failSafeRate),
+    permit: fill.order.permit as Hex,
+  },
+  signature: fill.signature as Hex,
+  makingAmount: BigInt(fill.makingAmount),
+});
+
+const encodeLimitOrderData = (limitData: PendleLimitOrderData): Hex => {
+  const encoded = {
+    limitRouter: limitData.limitRouter as Address,
+    epsSkipMarket: BigInt(limitData.epsSkipMarket),
+    normalFills: limitData.normalFills.map(transformFillOrderParams),
+    flashFills: limitData.flashFills.map(transformFillOrderParams),
+    optData: (limitData.optData || '0x') as Hex,
+  };
+  return encodeAbiParameters([limitOrderDataAbiType], [encoded]);
+};
 
 const app = express();
 
@@ -1210,7 +1317,86 @@ app.all('/simulateTokenSale', async (req: Request, res: Response, next: NextFunc
   }
 });
 
-// Centralized Error Handling
+app.all('/getLimitOrderData', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (req.method !== 'POST' && req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    const baseTokenAmountRaw =
+      pickString((req.body as any)?.base_token_amount) ??
+      pickString((req.body as any)?.baseTokenAmount) ??
+      pickString((req.query as any)?.base_token_amount) ??
+      pickString((req.query as any)?.baseTokenAmount);
+
+    const marketRaw =
+      pickString((req.body as any)?.market) ??
+      pickString((req.body as any)?.strategy) ??
+      pickString((req.query as any)?.market) ??
+      pickString((req.query as any)?.strategy);
+
+    if (!baseTokenAmountRaw) {
+      res.status(400).json({ error: 'Missing base_token_amount' });
+      return;
+    }
+    if (!marketRaw) {
+      res.status(400).json({ error: 'Missing market' });
+      return;
+    }
+
+    if (!/^\d+$/.test(baseTokenAmountRaw)) {
+      res.status(400).json({ error: 'Invalid base_token_amount (must be a non-negative integer string)' });
+      return;
+    }
+
+    if (!isAddress(marketRaw)) {
+      res.status(400).json({ error: 'Invalid market address' });
+      return;
+    }
+
+    const market = marketRaw as Address;
+    const ptAddress = await getPtAddressFromMarket(market);
+
+    const convertUrl = new URL(`${PENDLE_API_BASE}/core/v2/sdk/1/convert`);
+    convertUrl.searchParams.set('tokensIn', USDC_ADDRESS);
+    convertUrl.searchParams.set('amountsIn', baseTokenAmountRaw);
+    convertUrl.searchParams.set('tokensOut', ptAddress);
+    convertUrl.searchParams.set('slippage', '0.0001');
+    convertUrl.searchParams.set('useLimitOrder', 'true');
+    convertUrl.searchParams.set('enableAggregator', 'true');
+
+    const pendleResp = await fetch(convertUrl.toString());
+    const pendleJson = await pendleResp.json() as {
+      routes?: Array<{
+        contractParamInfo?: {
+          contractCallParams?: unknown[];
+        };
+      }>;
+    };
+
+    if (!pendleResp.ok) {
+      res.status(pendleResp.status).json(pendleJson);
+      return;
+    }
+
+    const limitData = pendleJson.routes?.[0]?.contractParamInfo?.contractCallParams?.[5] as PendleLimitOrderData | undefined;
+    if (!limitData) {
+      res.status(502).json({ error: 'No limit order data in Pendle API response' });
+      return;
+    }
+
+    const encodedLimitOrderData = encodeLimitOrderData(limitData);
+
+    res.status(200).json({
+      limitOrderData: limitData,
+      encoded: encodedLimitOrderData,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[PT-API Error]', err.message);
   if (res.headersSent) return;
