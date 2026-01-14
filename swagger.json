@@ -1104,6 +1104,640 @@
           }
         }
       }
+    },
+    "/info": {
+      "get": {
+        "summary": "Get API info",
+        "description": "Returns information about the Prime Risk API service including chain details and vault registry address.",
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "example": "Prime Risk API",
+                      "description": "Service name"
+                    },
+                    "version": {
+                      "type": "string",
+                      "example": "0.1.0",
+                      "description": "API version"
+                    },
+                    "chain": {
+                      "type": "string",
+                      "example": "mainnet",
+                      "description": "Connected chain name"
+                    },
+                    "chain_id": {
+                      "type": "integer",
+                      "example": 1,
+                      "description": "Chain ID"
+                    },
+                    "vault_registry": {
+                      "type": "string",
+                      "example": "0x1F6D4EEd083634020E2d0f11b3d401c28fD962c6",
+                      "description": "Vault registry contract address"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/vaults": {
+      "get": {
+        "summary": "List all vaults",
+        "description": "Returns a list of all vaults registered in the vault registry with their asset info and fee configuration.",
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "vaults": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/VaultResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/vaults/{address}": {
+      "get": {
+        "summary": "Get vault details",
+        "description": "Returns detailed information about a specific vault including asset, fees, and strategy count.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault contract address",
+            "example": "0x42C7E24d974A8790737F4f2237F60C2F93Cacf64"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid vault address"
+          },
+          "404": {
+            "description": "Vault not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/vaults/{address}/strategies": {
+      "get": {
+        "summary": "List vault strategies",
+        "description": "Returns all strategies available for a specific vault including leverage limits and maturity dates.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault contract address",
+            "example": "0x42C7E24d974A8790737F4f2237F60C2F93Cacf64"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "strategies": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StrategyResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid vault address"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/vaults/{address}/strategies/{id}": {
+      "get": {
+        "summary": "Get strategy details",
+        "description": "Returns detailed information about a specific strategy including pool address, token info, and leverage configuration.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault contract address",
+            "example": "0x42C7E24d974A8790737F4f2237F60C2F93Cacf64"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Strategy ID (1-indexed)",
+            "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid vault address"
+          },
+          "404": {
+            "description": "Strategy not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/positions/all": {
+      "get": {
+        "summary": "List all active positions",
+        "description": "Returns all active borrower positions across all vaults with health status and liquidation info.",
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "positions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PositionResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/positions/{vault}/{id}": {
+      "get": {
+        "summary": "Get position details",
+        "description": "Returns detailed information about a specific borrower position including health factor, leverage, and liquidation price.",
+        "parameters": [
+          {
+            "name": "vault",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault contract address",
+            "example": "0x42C7E24d974A8790737F4f2237F60C2F93Cacf64"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Position ID",
+            "example": 24
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid vault address"
+          },
+          "404": {
+            "description": "Position not found or empty"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/user/{wallet}/positions": {
+      "get": {
+        "summary": "Get user borrower positions",
+        "description": "Returns all active borrower positions for a specific wallet address. Optionally filter by vault.",
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User wallet address",
+            "example": "0x742d35Cc6634C0532925a3b844Bc9e7595f8bD67"
+          },
+          {
+            "name": "vault",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional: Filter positions by vault address",
+            "example": "0x42C7E24d974A8790737F4f2237F60C2F93Cacf64"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "string",
+                      "description": "User wallet address",
+                      "example": "0x742d35cc6634c0532925a3b844bc9e7595f8bd67"
+                    },
+                    "positions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PositionResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid wallet or vault address"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/user/{wallet}/lender": {
+      "get": {
+        "summary": "Get user lender positions",
+        "description": "Returns lender (LP) positions for a specific wallet showing vault shares and underlying asset amounts.",
+        "parameters": [
+          {
+            "name": "wallet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "User wallet address",
+            "example": "0x742d35Cc6634C0532925a3b844Bc9e7595f8bD67"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "string",
+                      "description": "User wallet address",
+                      "example": "0x742d35cc6634c0532925a3b844bc9e7595f8bd67"
+                    },
+                    "positions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LenderPositionResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid wallet address"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TokenInfo": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Token contract address",
+            "example": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Token symbol",
+            "example": "USDC"
+          },
+          "decimals": {
+            "type": "integer",
+            "description": "Token decimals",
+            "example": 6
+          }
+        }
+      },
+      "FeesInfo": {
+        "type": "object",
+        "properties": {
+          "spread_bps": {
+            "type": "integer",
+            "description": "Spread fee in basis points",
+            "example": 10
+          },
+          "early_withdrawal_bps": {
+            "type": "integer",
+            "description": "Early withdrawal fee in basis points",
+            "example": 0
+          },
+          "liquidation_bps": {
+            "type": "integer",
+            "description": "Liquidation fee in basis points",
+            "example": 0
+          }
+        }
+      },
+      "VaultResponse": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Vault contract address",
+            "example": "0x42c7e24d974a8790737f4f2237f60c2f93cacf64"
+          },
+          "asset": {
+            "$ref": "#/components/schemas/TokenInfo"
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Whether the vault is paused",
+            "example": false
+          },
+          "fees": {
+            "$ref": "#/components/schemas/FeesInfo"
+          },
+          "strategies_count": {
+            "type": "integer",
+            "description": "Number of strategies in the vault",
+            "example": 3
+          }
+        }
+      },
+      "StrategyResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Strategy ID",
+            "example": 1
+          },
+          "name": {
+            "type": "string",
+            "description": "Strategy name",
+            "example": "stcUSD-29-Jan-2026"
+          },
+          "pool": {
+            "type": "string",
+            "description": "Pendle pool address",
+            "example": "0xB451A36c8B6b2EAc77AD0737BA732818143A0E25"
+          },
+          "token": {
+            "$ref": "#/components/schemas/TokenInfo"
+          },
+          "maturity": {
+            "type": "integer",
+            "description": "Strategy maturity timestamp",
+            "example": 1769644800
+          },
+          "maturity_formatted": {
+            "type": "string",
+            "description": "Human-readable maturity date",
+            "example": "2026-01-29T00:00:00Z"
+          },
+          "min_leverage": {
+            "type": "number",
+            "description": "Minimum allowed leverage",
+            "example": 1.0
+          },
+          "max_leverage": {
+            "type": "number",
+            "description": "Maximum allowed leverage",
+            "example": 10.0
+          },
+          "is_disabled": {
+            "type": "boolean",
+            "description": "Whether the strategy is disabled",
+            "example": false
+          }
+        }
+      },
+      "TokenAmount": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "description": "Token amount (human-readable)",
+            "example": 499996.0
+          },
+          "token": {
+            "$ref": "#/components/schemas/TokenInfo"
+          },
+          "usd_value": {
+            "type": "number",
+            "description": "USD value (optional)",
+            "example": 589968.44957
+          },
+          "price": {
+            "type": "number",
+            "description": "Token price in USD (optional)",
+            "example": 0.99781
+          }
+        }
+      },
+      "PositionResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Position ID",
+            "example": 24
+          },
+          "vault": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string",
+                "example": "0x42c7e24d974a8790737f4f2237f60c2f93cacf64"
+              }
+            }
+          },
+          "strategy": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "example": 1
+              },
+              "name": {
+                "type": "string",
+                "example": "stcUSD-29-Jan-2026"
+              },
+              "maturity": {
+                "type": "integer",
+                "example": 1769644800
+              }
+            }
+          },
+          "collateral_type": {
+            "type": "string",
+            "description": "Type of collateral (base or strategy)",
+            "example": "base"
+          },
+          "assets_borrowed": {
+            "$ref": "#/components/schemas/TokenAmount"
+          },
+          "collateral_given": {
+            "$ref": "#/components/schemas/TokenAmount"
+          },
+          "strategy_balance": {
+            "$ref": "#/components/schemas/TokenAmount"
+          },
+          "leverage": {
+            "type": "number",
+            "description": "Current leverage multiplier",
+            "example": 5.6
+          },
+          "health_factor": {
+            "type": "number",
+            "description": "Position health factor (>1 is healthy)",
+            "example": 1.114753
+          },
+          "health_status": {
+            "type": "string",
+            "enum": ["green", "yellow", "red"],
+            "description": "Health status indicator",
+            "example": "green"
+          },
+          "liquidation_price": {
+            "type": "number",
+            "description": "Price at which position becomes liquidatable",
+            "example": 0.8950954
+          },
+          "current_price": {
+            "type": "number",
+            "description": "Current strategy token price",
+            "example": 0.99781
+          },
+          "subject_to_liquidation": {
+            "type": "boolean",
+            "description": "Whether position can be liquidated",
+            "example": false
+          }
+        }
+      },
+      "LenderPositionResponse": {
+        "type": "object",
+        "properties": {
+          "vault": {
+            "type": "string",
+            "description": "Vault contract address",
+            "example": "0x42c7e24d974a8790737f4f2237f60c2f93cacf64"
+          },
+          "shares": {
+            "type": "number",
+            "description": "Vault shares owned (human-readable)",
+            "example": 1000.5
+          },
+          "assets": {
+            "type": "number",
+            "description": "Underlying asset value (human-readable)",
+            "example": 1005.25
+          }
+        }
+      }
     }
   }
 }
