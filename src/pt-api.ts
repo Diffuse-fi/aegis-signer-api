@@ -1369,6 +1369,10 @@ app.all('/getLimitOrderData', async (req: Request, res: Response, next: NextFunc
     const pendleResp = await fetch(convertUrl.toString());
     const pendleJson = await pendleResp.json() as {
       routes?: Array<{
+        outputs?: Array<{
+          token: string;
+          amount: string;
+        }>;
         contractParamInfo?: {
           contractCallParams?: unknown[];
         };
@@ -1388,9 +1392,13 @@ app.all('/getLimitOrderData', async (req: Request, res: Response, next: NextFunc
 
     const encodedLimitOrderData = encodeLimitOrderData(limitData);
 
+    // Extract expected PT output from Pendle response (from routes[0].outputs[0].amount)
+    const expectedPtOut = pendleJson.routes?.[0]?.outputs?.[0]?.amount || '0';
+
     res.status(200).json({
       limitOrderData: limitData,
       encoded: encodedLimitOrderData,
+      expectedPtOut,
     });
   } catch (err) {
     next(err);

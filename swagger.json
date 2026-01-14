@@ -1006,6 +1006,10 @@
                     "encoded": {
                       "type": "string",
                       "description": "ABI-encoded limit order data for on-chain smart contract calls"
+                    },
+                    "expectedPtOut": {
+                      "type": "string",
+                      "description": "Expected PT output amount from limit orders (in wei). Use this with 99% multiplier for minAssetsOut slippage protection."
                     }
                   }
                 }
@@ -1090,6 +1094,10 @@
                     "encoded": {
                       "type": "string",
                       "description": "ABI-encoded limit order data for on-chain smart contract calls"
+                    },
+                    "expectedPtOut": {
+                      "type": "string",
+                      "description": "Expected PT output amount from limit orders (in wei). Use this with 99% multiplier for minAssetsOut slippage protection."
                     }
                   }
                 }
