@@ -938,7 +938,7 @@
         }
       }
     },
-    "/convert": {
+    "/getLimitOrderData": {
       "get": {
         "summary": "Get limit order data for USDC to PT conversion",
         "description": "Fetches limit order routing data from Pendle API for converting USDC to PT tokens. Returns both raw limit order data and ABI-encoded data for on-chain use. Supports both GET (query params) and POST (body) methods.",
