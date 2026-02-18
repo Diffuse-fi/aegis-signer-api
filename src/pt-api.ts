@@ -6,7 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { decodeFunctionResult, encodeFunctionData, encodeAbiParameters, isAddress, parseAbi, decodeErrorResult, type Address, type Hex } from 'viem';
+import { decodeFunctionResult, encodeFunctionData, encodeAbiParameters, isAddress, parseAbi, decodeErrorResult, keccak256, toHex, type Address, type Hex } from 'viem';
 import { ptConfig } from './pt-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -277,6 +277,32 @@ const transformFillOrderParams = (fill: PendleFillOrderParams) => ({
   signature: fill.signature as Hex,
   makingAmount: BigInt(fill.makingAmount),
 });
+
+// --- AdapterDataItem[] encoding (addressed adapter data) ---
+// Matches Solidity: struct AdapterDataItem { bytes32 adapterTypeHash; bytes data; }
+const adapterDataItemArrayAbiType = {
+  type: 'tuple[]',
+  components: [
+    { name: 'adapterTypeHash', type: 'bytes32' },
+    { name: 'data', type: 'bytes' },
+  ],
+} as const;
+
+// Pre-computed adapter type hashes (keccak256 of adapter name strings)
+const ADAPTER_TYPE_HASHES = {
+  PendleAdapter: keccak256(toHex('PendleAdapter')),
+  AegisMintAdapter: keccak256(toHex('AegisMintAdapter')),
+  AegisRedeemAdapter: keccak256(toHex('AegisRedeemAdapter')),
+} as const;
+
+type AdapterDataItem = {
+  adapterTypeHash: Hex;
+  data: Hex;
+};
+
+const encodeAdapterDataItems = (items: AdapterDataItem[]): Hex => {
+  return encodeAbiParameters([adapterDataItemArrayAbiType], [items]);
+};
 
 const encodeLimitOrderData = (limitData: PendleLimitOrderData): Hex => {
   const encoded = {
@@ -1391,6 +1417,161 @@ app.all('/getLimitOrderData', async (req: Request, res: Response, next: NextFunc
     res.status(200).json({
       limitOrderData: limitData,
       encoded: encodedLimitOrderData,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /getAddressedLimitOrderData
+// Like /getLimitOrderData, but wraps result into AdapterDataItem[] format.
+// Optionally includes Aegis data so a single encoded blob addresses both adapters.
+// Body: {
+//   base_token_amount: "123",       -- amount in base token (e.g. USDC smallest unit)
+//   market: "0x...",                 -- Pendle market address
+//   aegis_data: "0x..." (optional)   -- encoded data from /mint or /redeem endpoint
+//   aegis_adapter_type: "mint" | "redeem" (optional, defaults to "mint")
+// }
+app.all('/getAddressedLimitOrderData', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (req.method !== 'POST' && req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    const baseTokenAmountRaw =
+      pickString((req.body as any)?.base_token_amount) ??
+      pickString((req.body as any)?.baseTokenAmount) ??
+      pickString((req.query as any)?.base_token_amount) ??
+      pickString((req.query as any)?.baseTokenAmount);
+
+    const marketRaw =
+      pickString((req.body as any)?.market) ??
+      pickString((req.body as any)?.strategy) ??
+      pickString((req.query as any)?.market) ??
+      pickString((req.query as any)?.strategy);
+
+    const aegisDataRaw =
+      pickString((req.body as any)?.aegis_data) ??
+      pickString((req.body as any)?.aegisData) ??
+      pickString((req.query as any)?.aegis_data) ??
+      pickString((req.query as any)?.aegisData);
+
+    const aegisAdapterTypeRaw =
+      pickString((req.body as any)?.aegis_adapter_type) ??
+      pickString((req.body as any)?.aegisAdapterType) ??
+      pickString((req.query as any)?.aegis_adapter_type) ??
+      pickString((req.query as any)?.aegisAdapterType) ??
+      'mint'; // default to mint
+
+    if (!baseTokenAmountRaw) {
+      res.status(400).json({ error: 'Missing base_token_amount' });
+      return;
+    }
+    if (!marketRaw) {
+      res.status(400).json({ error: 'Missing market' });
+      return;
+    }
+
+    if (!/^\d+$/.test(baseTokenAmountRaw)) {
+      res.status(400).json({ error: 'Invalid base_token_amount (must be a non-negative integer string)' });
+      return;
+    }
+
+    if (!isAddress(marketRaw)) {
+      res.status(400).json({ error: 'Invalid market address' });
+      return;
+    }
+
+    // Validate aegis_data if provided
+    if (aegisDataRaw !== undefined && aegisDataRaw !== null) {
+      if (typeof aegisDataRaw !== 'string' || !aegisDataRaw.startsWith('0x')) {
+        res.status(400).json({ error: 'Invalid aegis_data (must be hex string starting with 0x)' });
+        return;
+      }
+    }
+
+    // Validate aegis_adapter_type
+    const aegisAdapterType = aegisAdapterTypeRaw.toLowerCase();
+    if (aegisAdapterType !== 'mint' && aegisAdapterType !== 'redeem') {
+      res.status(400).json({ error: 'Invalid aegis_adapter_type (must be "mint" or "redeem")' });
+      return;
+    }
+
+    // 1. Fetch Pendle limit order data (same logic as /getLimitOrderData)
+    const market = marketRaw as Address;
+    const ptAddress = await getPtAddressFromMarket(market);
+
+    const convertUrl = new URL(`${PENDLE_API_BASE}/core/v2/sdk/1/convert`);
+    convertUrl.searchParams.set('tokensIn', USDC_ADDRESS);
+    convertUrl.searchParams.set('amountsIn', baseTokenAmountRaw);
+    convertUrl.searchParams.set('tokensOut', ptAddress);
+    convertUrl.searchParams.set('slippage', '0.0001');
+    convertUrl.searchParams.set('useLimitOrder', 'true');
+    convertUrl.searchParams.set('enableAggregator', 'true');
+
+    const pendleResp = await fetch(convertUrl.toString());
+    const pendleJson = await pendleResp.json() as {
+      routes?: Array<{
+        contractParamInfo?: {
+          contractCallParams?: unknown[];
+        };
+      }>;
+    };
+
+    if (!pendleResp.ok) {
+      res.status(pendleResp.status).json(pendleJson);
+      return;
+    }
+
+    const limitData = pendleJson.routes?.[0]?.contractParamInfo?.contractCallParams?.[5] as PendleLimitOrderData | undefined;
+    if (!limitData) {
+      res.status(502).json({ error: 'No limit order data in Pendle API response' });
+      return;
+    }
+
+    // 2. Encode Pendle limit order data
+    const encodedPendleData = encodeLimitOrderData(limitData);
+
+    // 3. Build AdapterDataItem[] array
+    const items: AdapterDataItem[] = [];
+
+    // Always add Pendle adapter data
+    items.push({
+      adapterTypeHash: ADAPTER_TYPE_HASHES.PendleAdapter,
+      data: encodedPendleData,
+    });
+
+    // Optionally add Aegis adapter data
+    if (aegisDataRaw) {
+      const aegisHash = aegisAdapterType === 'redeem'
+        ? ADAPTER_TYPE_HASHES.AegisRedeemAdapter
+        : ADAPTER_TYPE_HASHES.AegisMintAdapter;
+
+      items.push({
+        adapterTypeHash: aegisHash,
+        data: aegisDataRaw as Hex,
+      });
+    }
+
+    // 4. Encode the full AdapterDataItem[] array
+    const encodedAdapterData = encodeAdapterDataItems(items);
+
+    if (ptConfig.debug) {
+      console.log('[getAddressedLimitOrderData] Items:', items.map(item => ({
+        adapterTypeHash: item.adapterTypeHash,
+        dataLength: item.data.length,
+      })));
+    }
+
+    res.status(200).json({
+      limitOrderData: limitData,
+      encodedLimitOrderData: encodedPendleData,
+      items: items.map(item => ({
+        adapterTypeHash: item.adapterTypeHash,
+        dataLength: item.data.length,
+      })),
+      encoded: encodedAdapterData,
     });
   } catch (err) {
     next(err);

@@ -185,6 +185,47 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
       const { order, signature: responseSignature } = responseData.data;
       const { yusd_amount, slippage_adjusted_amount, expiry, nonce, additional_data } = order;
 
+      // Check timestamps from Aegis API response
+      const currentTime = Math.floor(Date.now() / 1000); // Current Unix timestamp in seconds
+      const timestamps: Record<string, number> = {};
+
+      // Find all timestamp-like fields in the response
+      const findTimestamps = (obj: any, prefix = ''): void => {
+        if (obj === null || obj === undefined) return;
+        if (typeof obj === 'object') {
+          for (const [key, value] of Object.entries(obj)) {
+            const fullKey = prefix ? `${prefix}.${key}` : key;
+            if (typeof value === 'number' && value > 1000000000 && value < 9999999999) {
+              // Likely a Unix timestamp (between 2001 and 2286)
+              timestamps[fullKey] = value;
+            } else if (typeof value === 'string' && /^\d{10}$/.test(value)) {
+              // String timestamp
+              const ts = parseInt(value, 10);
+              if (ts > 1000000000 && ts < 9999999999) {
+                timestamps[fullKey] = ts;
+              }
+            } else if (typeof value === 'object') {
+              findTimestamps(value, fullKey);
+            }
+          }
+        }
+      };
+
+      findTimestamps(responseData);
+
+      // Log timestamp differences
+      console.log('\n--- Timestamp Analysis ---');
+      console.log(`Current time: ${currentTime} (${new Date(currentTime * 1000).toISOString()})`);
+      for (const [key, ts] of Object.entries(timestamps)) {
+        const diff = ts - currentTime;
+        const diffAbs = Math.abs(diff);
+        const diffMinutes = Math.floor(diffAbs / 60);
+        const diffSeconds = diffAbs % 60;
+        const sign = diff >= 0 ? '+' : '-';
+        console.log(`${key}: ${ts} (${new Date(ts * 1000).toISOString()}) - ${sign}${diffMinutes}m ${diffSeconds}s from now`);
+      }
+      console.log('---------------------------\n');
+
       // Print required fields to console
       if (config.debug) {
         console.log('--- Aegis Response Data ---');

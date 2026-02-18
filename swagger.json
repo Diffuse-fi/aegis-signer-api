@@ -1105,6 +1105,188 @@
         }
       }
     },
+    "/getAddressedLimitOrderData": {
+      "get": {
+        "summary": "Get addressed limit order data (AdapterDataItem[] format)",
+        "description": "Like /getLimitOrderData but wraps the result into the AdapterDataItem[] envelope format. Each adapter in the route chain receives only its own addressed data. Optionally includes Aegis adapter data so both PendleAdapter and AegisMintAdapter/AegisRedeemAdapter get their data in a single encoded blob. Supports both GET (query params) and POST (body) methods.",
+        "parameters": [
+          {
+            "name": "base_token_amount",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Amount of USDC to convert (e.g., '1000000000' for 1000 USDC with 6 decimals)"
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pendle market address"
+          },
+          {
+            "name": "aegis_data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional: ABI-encoded Aegis adapter data (hex string from /mint or /redeem endpoint's encodedData field). If provided, it will be included as an additional AdapterDataItem addressed to AegisMintAdapter or AegisRedeemAdapter."
+          },
+          {
+            "name": "aegis_adapter_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["mint", "redeem"],
+              "default": "mint"
+            },
+            "description": "Optional: Type of Aegis adapter ('mint' or 'redeem'). Determines which ADAPTER_TYPE_HASH is used. Defaults to 'mint'."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "limitOrderData": {
+                      "type": "object",
+                      "description": "Raw limit order data from Pendle API"
+                    },
+                    "encodedLimitOrderData": {
+                      "type": "string",
+                      "description": "ABI-encoded Pendle limit order data (inner bytes for PendleAdapter)"
+                    },
+                    "items": {
+                      "type": "array",
+                      "description": "Summary of AdapterDataItem entries in the encoded blob",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "adapterTypeHash": {
+                            "type": "string",
+                            "description": "bytes32 keccak256 hash identifying the adapter"
+                          },
+                          "dataLength": {
+                            "type": "integer",
+                            "description": "Length of the hex-encoded data for this adapter"
+                          }
+                        }
+                      }
+                    },
+                    "encoded": {
+                      "type": "string",
+                      "description": "Final ABI-encoded AdapterDataItem[] — pass this as `data` to the vault/borrow call"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Pendle API error or no limit order data available"
+          }
+        }
+      },
+      "post": {
+        "summary": "Get addressed limit order data (AdapterDataItem[] format)",
+        "description": "Like /getLimitOrderData but wraps the result into the AdapterDataItem[] envelope format. Each adapter in the route chain receives only its own addressed data. Optionally includes Aegis adapter data so both PendleAdapter and AegisMintAdapter/AegisRedeemAdapter get their data in a single encoded blob. Supports both GET (query params) and POST (body) methods.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["base_token_amount", "market"],
+                "properties": {
+                  "base_token_amount": {
+                    "type": "string",
+                    "description": "Amount of USDC to convert (e.g., '1000000000' for 1000 USDC with 6 decimals). Also accepts camelCase: baseTokenAmount",
+                    "example": "1000000000"
+                  },
+                  "market": {
+                    "type": "string",
+                    "description": "Pendle market address. Also accepts: strategy",
+                    "example": "0xB451A36c8B6b2EAc77AD0737BA732818143A0E25"
+                  },
+                  "aegis_data": {
+                    "type": "string",
+                    "description": "Optional: ABI-encoded Aegis adapter data (hex string from /mint or /redeem endpoint's encodedData field). Also accepts camelCase: aegisData",
+                    "example": "0x..."
+                  },
+                  "aegis_adapter_type": {
+                    "type": "string",
+                    "enum": ["mint", "redeem"],
+                    "description": "Optional: Type of Aegis adapter ('mint' or 'redeem'). Also accepts camelCase: aegisAdapterType. Defaults to 'mint'.",
+                    "default": "mint"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "limitOrderData": {
+                      "type": "object",
+                      "description": "Raw limit order data from Pendle API"
+                    },
+                    "encodedLimitOrderData": {
+                      "type": "string",
+                      "description": "ABI-encoded Pendle limit order data (inner bytes for PendleAdapter)"
+                    },
+                    "items": {
+                      "type": "array",
+                      "description": "Summary of AdapterDataItem entries in the encoded blob",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "adapterTypeHash": {
+                            "type": "string",
+                            "description": "bytes32 keccak256 hash identifying the adapter"
+                          },
+                          "dataLength": {
+                            "type": "integer",
+                            "description": "Length of the hex-encoded data for this adapter"
+                          }
+                        }
+                      }
+                    },
+                    "encoded": {
+                      "type": "string",
+                      "description": "Final ABI-encoded AdapterDataItem[] — pass this as `data` to the vault/borrow call"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (missing or invalid parameters)"
+          },
+          "502": {
+            "description": "Pendle API error or no limit order data available"
+          }
+        }
+      }
+    },
     "/info": {
       "get": {
         "summary": "Get API info",
