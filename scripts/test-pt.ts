@@ -98,6 +98,56 @@ async function main() {
     console.error('previewBorrow failed:', error);
     process.exit(1);
   }
+
+  // 4) getPtBuyBSLow
+  try {
+    console.log('\n📉 Testing /getPtBuyBSLow...');
+
+    const targetPtAmount = process.env.TARGET_PT_AMOUNT || '1000000'; // 1 PT (6 decimals)
+    const payload = {
+      target_pt_amount: targetPtAmount,
+      vault_address: VAULT,
+      strategy_id: STRATEGY_ID,
+      precision_bps: '50',
+      data: '0x',
+    };
+
+    console.log('Sending Payload:', JSON.stringify(payload, null, 2));
+
+    const res = await fetch(`${API_URL}/getPtBuyBSLow`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+
+    console.log(`Status: ${res.status}`);
+    console.log('Response:', typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+
+    if (res.status !== 200) {
+      console.error('getPtBuyBSLow failed with status', res.status);
+      process.exit(1);
+    }
+
+    if (data?.baseAssetAmount === undefined) {
+      console.error('getPtBuyBSLow response missing baseAssetAmount');
+      process.exit(1);
+    }
+
+    console.log('✅ getPtBuyBSLow OK: baseAssetAmount =', data.baseAssetAmount);
+  } catch (error) {
+    console.error('getPtBuyBSLow failed:', error);
+    process.exit(1);
+  }
 }
 
 main();

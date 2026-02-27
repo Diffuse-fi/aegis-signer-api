@@ -187,11 +187,13 @@ async function getPtAddressFromMarket(marketAddress: Address): Promise<Address> 
 }
 
 async function ethCallMany(bundles: EthCallManyBundle[]) {
+  // eth_callMany: [bundles, simulationContext]
+  const simulationContext = { blockNumber: 'latest' as const, transactionIndex: -1 };
   const rpcBody = {
     jsonrpc: '2.0',
     id: 1,
     method: 'eth_callMany',
-    params: [bundles],
+    params: [bundles, simulationContext],
   };
 
   if (ptConfig.debug) {
@@ -219,7 +221,11 @@ async function ethCallMany(bundles: EthCallManyBundle[]) {
   }
 
   if (json?.error) {
-    throw new Error(`Alchemy RPC error: ${json.error?.message || 'Unknown error'}`);
+    const errMsg = json.error?.message || 'Unknown error';
+    console.error('[PT-API Error] RPC error:', errMsg);
+    console.error('[PT-API Error] Full response:', JSON.stringify(json, null, 2));
+    console.error('[PT-API Error] Request params:', JSON.stringify(rpcBody.params, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2));
+    throw new Error(`RPC error: ${errMsg}`);
   }
 
   return json;
@@ -397,6 +403,8 @@ app.all('/getPtAmount', async (req: Request, res: Response, next: NextFunction):
     const strategyId = parseBigIntParam(strategyIdRaw, 'strategy_id');
     const vault = vaultRaw as Address;
 
+    console.log('[getPtAmount]', { vault, strategyId: strategyId.toString(), usdcAmount: usdcAmount.toString() });
+
     const approveData = encodeFunctionData({
       abi: erc20Abi,
       functionName: 'approve',
@@ -532,6 +540,8 @@ app.all('/getPtBuyBSLow', async (req: Request, res: Response, next: NextFunction
       res.status(400).json({ error: 'Invalid data (must be hex string starting with 0x)' });
       return;
     }
+
+    console.log('[getPtBuyBSLow]', { vault, strategyId: strategyId.toString(), targetPtAmount: targetPtAmount.toString(), precisionBps: precisionBps.toString(), data });
 
     const approveData = encodeFunctionData({
       abi: erc20Abi,
@@ -708,17 +718,14 @@ app.all('/previewBorrow', async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    if (ptConfig.debug) {
-      console.log('[previewBorrow] Parameters:', {
-        forUser: ptConfig.usdcHolder,
-        strategyId: strategyId.toString(),
-        collateralType: collateralTypeNum,
-        collateralAmount: collateralAmount.toString(),
-        assetsToBorrow: assetsToBorrow.toString(),
-        data: data,
-        vault,
-      });
-    }
+    console.log('[previewBorrow]', {
+      vault,
+      strategyId: strategyId.toString(),
+      collateralType: collateralTypeNum,
+      collateralAmount: collateralAmount.toString(),
+      assetsToBorrow: assetsToBorrow.toString(),
+      data,
+    });
 
     const previewBorrowData = encodeFunctionData({
       abi: vaultAbi,
@@ -1579,7 +1586,7 @@ app.all('/getAddressedLimitOrderData', async (req: Request, res: Response, next:
 });
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('[PT-API Error]', err.message);
+  console.error('[PT-API Error]', err);
   if (res.headersSent) return;
   res.status(500).json({ error: err.message || 'Internal Server Error' });
 });
