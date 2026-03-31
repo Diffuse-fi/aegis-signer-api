@@ -153,7 +153,8 @@ app.post('/mint', async (req: Request, res: Response, next: NextFunction): Promi
       collateral_amount,
       signature,
       slippage: parsedSlippage,
-      token_address: config.aegis.tokenAddress
+      token_address: config.aegis.tokenAddress,
+      chain_id: config.chainId,
     };
 
     if (config.debug) {
@@ -364,7 +365,8 @@ app.post('/redeem', async (req: Request, res: Response, next: NextFunction): Pro
       collateral_asset: collateral_asset,
       yusd_amount,
       signature,
-      slippage: parsedSlippage
+      slippage: parsedSlippage,
+      chain_id: config.chainId,
     };
 
     if (config.debug) {

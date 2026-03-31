@@ -30,11 +30,22 @@ const getCorsOrigin = (raw: string): string | string[] => {
   return origins;
 };
 
+const parseChainId = (): number => {
+  const raw = getEnvVar('CHAIN_ID', false);
+  if (!raw) return 1;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error('CHAIN_ID must be a positive integer');
+  }
+  return n;
+};
+
 export const config = {
   port: parseInt(getEnvVar('PORT', false), 10) || 3000,
   privateKey: getPrivateKey(),
   corsOrigin: getCorsOrigin(getEnvVar('CORS_ORIGIN', false)),
   debug: getEnvVar('DEBUG', false) === 'true',
+  chainId: parseChainId(),
   aegis: {
     beneficiary: getEnvVar('AEGIS_BENEFICIARY'),
     tokenAddress: getEnvVar('AEGIS_TOKEN_ADDRESS'),
